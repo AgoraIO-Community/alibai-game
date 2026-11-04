@@ -65,7 +65,7 @@ export default function RulesPage() {
           <div className="bg-obsidian p-4">
             <p className="label-mono text-ivory/50">Scoring</p>
             <p className="mt-2 font-mono text-2xl text-gold">1,000</p>
-            <p className="mt-1 text-xs text-ivory/55">400 verdict · up to 400 clues · up to 200 time bonus.</p>
+            <p className="mt-1 text-xs text-ivory/55">500 verdict · 300 evidence · 150 verified facts · 50 time bonus.</p>
           </div>
         </section>
 
