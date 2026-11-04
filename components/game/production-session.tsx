@@ -34,6 +34,7 @@ export function ProductionSession({ sessionId, mode }: { sessionId: string; mode
   const [now, setNow] = useState(0)
   const [clockOffset, setClockOffset] = useState(0)
   const syncingFacts = useRef(false)
+  const autoConnected = useRef(false)
   const questionOffset = useRef(0)
   const applyView = useCallback((data: SessionView) => {
     setView(data)
@@ -114,6 +115,14 @@ export function ProductionSession({ sessionId, mode }: { sessionId: string; mode
     void voice.disconnect()
     void sessionRequest(sessionId,'end',{}).then(() => refresh()).catch(() => setError('The interview has ended. Please retry filing your verdict.'))
   }, [mode, view?.session.state, left, sessionId, refresh, voice.disconnect])
+  // Entering the room connects straight away. Failures fall back to the retry button.
+  useEffect(() => {
+    const state = view?.session.state
+    if(mode !== 'interview' || autoConnected.current || voice.phase !== 'idle' || left <= 0) return
+    if(!state || !['created','preparing','active'].includes(state)) return
+    autoConnected.current = true
+    void voice.start()
+  }, [mode, view?.session.state, voice.phase, voice.start, left])
 
 
   return <main className="min-h-dvh bg-obsidian spotlight px-5 pb-16 pt-6 text-ivory">
@@ -137,7 +146,7 @@ export function ProductionSession({ sessionId, mode }: { sessionId: string; mode
               <div ref={voice.videoElement} className="absolute inset-0" />
               {!['live','reconnecting'].includes(voice.phase) && <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center bg-obsidian/70 p-6 text-center">
                 <p className="font-display text-3xl">{view.briefing.publicSuspect.name}</p>
-                <p className="mt-4 max-w-md text-sm text-ivory/60">{voice.phase === 'connecting' ? 'Opening a secure line…' : voice.phase === 'waiting_media' ? 'Waiting for the suspect’s audio and avatar…' : 'Speak naturally. The suspect will answer aloud.'}</p>
+                <p className="mt-4 max-w-md text-sm text-ivory/60">{voice.phase === 'connecting' ? 'Opening a secure line…' : voice.phase === 'waiting_media' ? 'Waiting for the suspect’s audio and avatar…' : ['error','ended'].includes(voice.phase) ? 'The line is down.' : 'Opening a secure line…'}</p>
               </div>}
             </div>
             <div className="flex flex-col items-center gap-4 border-t border-gold/20 p-4 text-center">
@@ -147,7 +156,7 @@ export function ProductionSession({ sessionId, mode }: { sessionId: string; mode
               {['connecting','waiting_media'].includes(voice.phase) && <button type="button" className="min-h-11 text-sm text-ivory/70 underline" onClick={async()=>{await voice.disconnect();await action('end')}}>Cancel connection</button>}
               {view.session.state === 'abandoned' && <Link className="min-h-11 text-gold underline" href="/rules">Request another case</Link>}
 
-              {['created','preparing','active'].includes(view.session.state) && ['idle','error','ended'].includes(voice.phase) && <Button className={buttonClass} disabled={busy} onClick={async () => { await voice.disconnect(); await voice.start() }}>{view.session.state === 'active' ? 'Reconnect interview' : 'Connect voice interview'}</Button>}
+              {['created','preparing','active'].includes(view.session.state) && ['error','ended'].includes(voice.phase) && <Button className={buttonClass} disabled={busy} onClick={async () => { await voice.disconnect(); await voice.start() }}>{view.session.state === 'active' ? 'Reconnect interview' : 'Retry connection'}</Button>}
               {['live','reconnecting'].includes(voice.phase) && <Button className={buttonClass} onClick={() => void voice.toggleMute()}>{voice.muted ? 'Unmute microphone' : 'Mute microphone'}</Button>}
             </div>
           </section>
