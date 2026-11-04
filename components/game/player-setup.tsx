@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { gameRequest, type Briefing } from '@/lib/game/api'
+import { MicCheck } from './mic-check'
 
 export function PlayerSetup() {
   const router = useRouter()
@@ -13,7 +14,6 @@ export function PlayerSetup() {
   const [name, setName] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
-  const [mic, setMic] = useState('')
   const requestKey = useRef<string | null>(null)
 
   useEffect(() => {
@@ -48,14 +48,6 @@ export function PlayerSetup() {
     }
   }
 
-  async function checkMic() {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({audio:true})
-      stream.getTracks().forEach(track => track.stop())
-      setMic('Microphone ready.')
-    } catch { setMic('Microphone access is blocked. You can still review your case.') }
-  }
-
   async function signOut() {
     setBusy(true); setError('')
     try {
@@ -80,9 +72,7 @@ export function PlayerSetup() {
             minLength={2} maxLength={24} required
             className="mt-2 h-12 rounded-none border-gold/30 bg-charcoal/50 text-ivory" />
         </label>
-        <button type="button" onClick={() => void checkMic()}
-          className="min-h-12 border border-gold/30 p-3 text-left text-sm text-ivory">Check microphone</button>
-        {mic && <p className="text-xs text-ivory/55">{mic}</p>}
+        <MicCheck />
       </>}
       {error && <p role="alert" className="border border-oxblood bg-oxblood/15 p-3 text-sm text-ivory">{error}</p>}
       <Button type="submit" disabled={busy || (authenticated && name.trim().length < 2)}
