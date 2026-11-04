@@ -21,6 +21,7 @@ export interface Briefing {
 }
 export interface SessionView {
   session: { id: string; state: string; started_at: string | null; ended_at: string | null }
+  serverTime: string
   briefing: Briefing
   notebook: PublicEvidence[]
   suggestions: { questions: PublicQuestion[]; more: number | null }
@@ -42,6 +43,9 @@ const messages: Record<string, string> = {
   SESSION_NOT_FOUND: 'This case is unavailable for your detective identity. Return to the rules to start a new case.',
   END_INTERROGATION_FIRST: 'End the interrogation before filing your verdict.',
   VERDICT_LOCKED: 'Your verdict is already filed. Open the results to review it.',
+  AGENT_START_PENDING: 'The suspect is still being brought in. Please wait a moment and retry.',
+  AGENT_NOT_READY: 'The suspect is not ready yet. Please retry the connection.',
+  AGENT_STATE_CONFLICT: 'This interview was cancelled before the suspect arrived. Request another case.',
   MEDIA_NOT_CONFIGURED: 'The voice interview is not configured yet. Your case is saved and the clock has not started.',
 }
 export async function gameRequest<T>(path: string, init: RequestInit = {}): Promise<T> {

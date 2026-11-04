@@ -53,14 +53,14 @@ export function useSuspectVoice(sessionId: string, onReady: () => Promise<void>)
     const isCurrent = () => attempt.current === current
     setError(''); setPhase('connecting'); setMuted(false); setAudioBlocked(false)
     await releaseMedia()
-    let agentRequested = false
+    let agentRequested = false, agentFailed = false
     try {
       const AgoraRTC = (await import('agora-rtc-sdk-ng')).default
       AgoraRTC.setLogLevel(3)
       const microphone = await AgoraRTC.createMicrophoneAudioTrack({ encoderConfig:'speech_standard', AEC:true, ANS:true, AGC:true })
       if (!isCurrent()) { microphone.stop(); microphone.close(); return }
       microphoneRef.current = microphone
-      const credentials = await sessionRequest<RtcCredentials>(sessionId, 'agent', {})
+      const credentials = await sessionRequest<RtcCredentials>(sessionId, 'agent', {}).catch(error => { agentFailed = true; throw error })
       agentRequested = true; hasAgent.current = true
       if (!isCurrent()) { await releaseMedia(); void sessionRequest(sessionId,'end',{}).catch(()=>{}); return }
       const client = AgoraRTC.createClient({ mode:'rtc', codec:'h264' })
@@ -122,11 +122,15 @@ export function useSuspectVoice(sessionId: string, onReady: () => Promise<void>)
       }, 60000)
       // Replay from a fresh user gesture can release browser autoplay restrictions.
       resumeRef.current = () => { audioRef.current?.play(); failedAutoplay = false; setAudioBlocked(false); void markReady() }
-    } catch {
+    } catch (error) {
       if(isCurrent()) {
         starting.current = false; active.current = false; await releaseMedia(); setPhase('error')
-        setError('Could not connect the interview. Allow microphone access, check your connection, and retry. Your case is saved.')
-        if(agentRequested) await sessionRequest(sessionId,'end',{}).then(() => readyCallback.current()).catch(()=>{})
+        setError(agentFailed
+          ? (error instanceof Error ? error.message : 'The suspect could not be reached. Your clock never started.')
+          : 'Could not connect the interview. Allow microphone access, check your connection, and retry. Your case is saved.')
+        if(agentRequested) await sessionRequest(sessionId,'end',{}).catch(()=>{})
+        // A failed start abandons the session on the server; show the player the way out.
+        if(agentRequested || agentFailed) await readyCallback.current().catch(()=>{})
       }
     }
   }, [sessionId, releaseMedia])

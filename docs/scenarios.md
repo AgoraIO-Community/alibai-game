@@ -53,7 +53,7 @@ Unit tests cover all fixtures, permitted innocent lies, access/time/location con
 
 ## Applying the tables to an existing Supabase project
 
-The repository includes an additive SQL Editor bundle at `supabase/install.sql`, generated from the three migration files and the validated fixture seed. Regenerate it with `node --import tsx scripts/scenarios/install-sql.ts` after changing migrations or fixtures.
+The repository includes an additive SQL Editor bundle at `supabase/install.sql`, generated from the migration files and the validated fixture seed. Regenerate it with `node --import tsx scripts/scenarios/install-sql.ts` after changing migrations or fixtures.
 
 1. Select the exact intended project in the Supabase dashboard. The SQL file does not choose a project for you.
 2. Run `supabase/preflight.sql`. If it reports any existing app table or function, stop and adapt the migration to that schema; do not drop or replace existing tables or policies.

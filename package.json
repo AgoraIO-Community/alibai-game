@@ -17,6 +17,7 @@
     "scenarios:seed-sql": "node --env-file-if-exists=.env.local --import tsx scripts/scenarios/seed-sql.ts",
     "scenarios:publish": "node --env-file-if-exists=.env.local --import tsx scripts/scenarios/publish.ts",
     "agents:cleanup": "node --env-file-if-exists=.env.local --conditions=react-server --import tsx scripts/cleanup-agents.ts",
+    "agents:cleanup:watch": "node --env-file-if-exists=.env.local --conditions=react-server --import tsx scripts/cleanup-agents.ts --watch",
     "scenarios:install-sql": "node --import tsx scripts/scenarios/install-sql.ts"
   },
   "dependencies": {

@@ -32,13 +32,21 @@ export function ProductionSession({ sessionId, mode }: { sessionId: string; mode
   const [evidenceIds, setEvidenceIds] = useState<string[]>([])
   const [reasoning, setReasoning] = useState('')
   const [now, setNow] = useState(0)
+  const [clockOffset, setClockOffset] = useState(0)
   const syncingFacts = useRef(false)
+  const questionOffset = useRef(0)
+  const applyView = useCallback((data: SessionView) => {
+    setView(data)
+    setClockOffset(Date.parse(data.serverTime) - Date.now())
+    // Background updates only carry page one; leave a page the player opened alone.
+    if(questionOffset.current === 0) { setQuestions(data.suggestions.questions); setMore(data.suggestions.more) }
+  }, [])
   const refresh = useCallback(async () => {
     try {
       const data = await sessionRequest<SessionView>(sessionId, 'read')
-      setView(data); setQuestions(data.suggestions.questions); setMore(data.suggestions.more); setError('')
+      applyView(data); setError('')
     } catch (e) { setError(e instanceof Error ? e.message : 'Could not open the case.') }
-  }, [sessionId])
+  }, [sessionId, applyView])
   const voice = useSuspectVoice(sessionId, refresh)
   useEffect(() => {
     if(mode !== 'interview' || view?.session.state !== 'active' || voice.phase !== 'live') return
@@ -48,14 +56,14 @@ export function ProductionSession({ sessionId, mode }: { sessionId: string; mode
       syncingFacts.current = true
       try {
         const data = await sessionRequest<SessionView>(sessionId,'sync-facts',{})
-        if(!stopped) { setView(data); setQuestions(data.suggestions.questions); setMore(data.suggestions.more) }
+        if(!stopped) applyView(data)
       } catch { /* Media continues; the next authenticated provider sync can retry. */ }
       finally { syncingFacts.current = false }
     }
     void sync()
     const timer = window.setInterval(() => void sync(), 5000)
     return () => { stopped = true; window.clearInterval(timer) }
-  }, [mode,view?.session.state,voice.phase,sessionId])
+  }, [mode,view?.session.state,voice.phase,sessionId,applyView])
 
   useEffect(() => { void refresh() }, [refresh])
   useEffect(() => {
@@ -85,19 +93,21 @@ export function ProductionSession({ sessionId, mode }: { sessionId: string; mode
 
   async function action(actionName: string, body: unknown = {}) {
     setBusy(true); setError('')
-    try { if(actionName === 'end') await sessionRequest(sessionId,'sync-facts',{}).catch(()=>{}); await sessionRequest(sessionId, actionName, body); await refresh(); return true }
+    try { await sessionRequest(sessionId, actionName, body); await refresh(); return true }
     catch (e) { setError(e instanceof Error ? e.message : 'Request failed.'); return false }
     finally { setBusy(false) }
   }
   async function nextQuestions() {
     try {
-      const page = await gameRequest<{ questions: PublicQuestion[]; more: number | null }>(`/api/sessions/${sessionId}/questions?offset=${more ?? 0}`)
+      const offset = more ?? 0
+      const page = await gameRequest<{ questions: PublicQuestion[]; more: number | null }>(`/api/sessions/${sessionId}/questions?offset=${offset}`)
+      questionOffset.current = offset
       setQuestions(page.questions); setMore(page.more); setSelectedQuestion(null)
     } catch (e) { setError(e instanceof Error ? e.message : 'Could not load questions.') }
   }
   const started = view?.session.started_at ? Date.parse(view.session.started_at) : null
   const ended = view?.session.ended_at ? Date.parse(view.session.ended_at) : null
-  const left = started === null ? 180 : Math.max(0, Math.ceil(180 - ((ended ?? (now || started)) - started) / 1000))
+  const left = started === null ? 180 : Math.max(0, Math.ceil(180 - ((ended ?? ((now || started - clockOffset) + clockOffset)) - started) / 1000))
   const clock = `${String(Math.floor(left / 60)).padStart(2, '0')}:${String(left % 60).padStart(2, '0')}`
   useEffect(() => {
     if(mode !== 'interview' || view?.session.state !== 'active' || left > 0) return

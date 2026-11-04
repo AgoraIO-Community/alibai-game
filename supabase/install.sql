@@ -5,7 +5,7 @@
 begin;
 do $$ begin
  if exists(select 1 from pg_class c join pg_namespace n on n.oid=c.relnamespace where n.nspname='public' and c.relname=any(array['players','scenarios','scenario_secrets','suspects','evidence','secret_evidence','suggested_questions','scenario_facts','scenario_allocations','game_sessions','session_assignment_requests','player_scenario_history','session_events','session_facts','session_clues','session_updates','verdicts','scores','scenario_generation_jobs','agent_runs','avatar_catalog']))
- or exists(select 1 from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='public' and p.proname=any(array['freeze_scenario_content','publish_scenario','assign_scenario','session_action','read_leaderboard','agent_lifecycle','assign_session_avatar','freeze_session_assignment','freeze_avatar_identity'])) then
+ or exists(select 1 from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='public' and p.proname=any(array['freeze_scenario_content','publish_scenario','assign_scenario','session_action','read_leaderboard','agent_lifecycle','assign_session_avatar','freeze_session_assignment','freeze_avatar_identity','end_session','release_unstarted_session'])) then
   raise exception 'INSTALL_COLLISION: existing app tables/functions detected; inspect preflight.sql and adapt migrations instead of replacing objects';
  end if;
 end $$;
@@ -451,6 +451,225 @@ end $$;
 revoke all on function public.assign_session_avatar(),public.freeze_session_assignment(),public.freeze_avatar_identity(),public.assign_scenario(uuid,uuid) from public,anon,authenticated;
 grant execute on function public.assign_scenario(uuid,uuid) to service_role;
 
+
+-- 20261104231248_abort_preparing_session.sql
+-- A cancelled startup must not leave a billable agent or start a clock later.
+create function public.end_session(p_player uuid,p_session uuid) returns jsonb
+language plpgsql set search_path='' as $$
+declare g public.game_sessions; at_time timestamptz:=clock_timestamp(); begin
+ select * into g from public.game_sessions where id=p_session and player_id=p_player for update;
+ if not found then raise exception 'SESSION_NOT_FOUND'; end if;
+ if g.state in ('created','preparing') then
+  update public.game_sessions set state='abandoned',updated_at=at_time where id=g.id;
+ elsif g.state='active' then
+  update public.game_sessions set state='ended',ended_at=least(at_time,started_at+interval '180 seconds'),updated_at=at_time where id=g.id;
+ elsif g.state not in ('ended','scored','abandoned') then raise exception 'NOT_ACTIVE'; end if;
+ insert into public.session_updates(session_id,kind) values(g.id,'state');
+ return '{}';
+end $$;
+revoke all on function public.end_session(uuid,uuid) from public,anon,authenticated;
+grant execute on function public.end_session(uuid,uuid) to service_role;
+
+create or replace function public.agent_lifecycle(p_player uuid,p_session uuid,p_action text,p_agent text default null) returns jsonb language plpgsql set search_path='' as $$
+declare g public.game_sessions; a public.agent_runs; begin
+ select * into g from public.game_sessions where id=p_session and player_id=p_player for update;
+ if not found then raise exception 'SESSION_NOT_FOUND'; end if;
+ select * into a from public.agent_runs where session_id=g.id;
+ if p_action='claim' then
+  if g.state not in ('created','preparing','active') then raise exception 'NOT_ACTIVE'; end if;
+  if a.session_id is not null then return jsonb_build_object('claimed',false,'state',a.state,'agentId',a.agent_id); end if;
+  insert into public.agent_runs(session_id,state) values(g.id,'starting');
+  update public.game_sessions set state='preparing',updated_at=now() where id=g.id;
+  return jsonb_build_object('claimed',true);
+ elsif p_action='commit' then
+  if g.state<>'preparing' or a.state is distinct from 'starting' or p_agent is null then raise exception 'AGENT_STATE_CONFLICT'; end if;
+  update public.agent_runs set state='running',agent_id=p_agent,updated_at=now() where session_id=g.id;
+ elsif p_action='ready' then
+  if g.state not in ('preparing','active') or a.state is distinct from 'running' or a.agent_id is null then raise exception 'AGENT_NOT_READY'; end if;
+  if g.state='preparing' then update public.game_sessions set state='active',started_at=clock_timestamp(),updated_at=now() where id=g.id; end if;
+ elsif p_action='stop' then
+  if a.agent_id is not null and a.state<>'stopped' then
+   update public.agent_runs set state='stopping',updated_at=now() where session_id=g.id;
+   return jsonb_build_object('agentId',a.agent_id);
+  end if;
+ elsif p_action='stopped' then update public.agent_runs set state='stopped',updated_at=now() where session_id=g.id;
+ elsif p_action='failed' then
+  -- Fail closed: an ambiguous network timeout may have started the remote agent.
+  -- Keep its reservation; operators reconcile it rather than creating duplicates.
+  update public.agent_runs set state='failed',updated_at=now() where session_id=g.id;
+ else raise exception 'UNKNOWN_ACTION'; end if;
+ insert into public.session_updates(session_id,kind) values(g.id,'state');
+ return '{}';
+end $$;
+revoke all on function public.agent_lifecycle(uuid,uuid,text,text) from public,anon,authenticated;
+grant execute on function public.agent_lifecycle(uuid,uuid,text,text) to service_role;
+
+
+-- 20261104233500_session_recovery.sql
+-- A failed or cancelled startup must not trap the player or consume their case.
+-- The clock never started, so the player learned nothing beyond the public briefing.
+create function public.release_unstarted_session(p_session uuid) returns void language plpgsql set search_path='' as $$
+declare released uuid; begin
+ update public.game_sessions set state='abandoned',updated_at=clock_timestamp()
+ where id=p_session and state in ('created','preparing') returning scenario_id into released;
+ if released is null then return; end if;
+ delete from public.player_scenario_history where session_id=p_session;
+ update public.scenario_allocations set lease_until='-infinity' where scenario_id=released;
+end $$;
+revoke all on function public.release_unstarted_session(uuid) from public,anon,authenticated;
+grant execute on function public.release_unstarted_session(uuid) to service_role;
+
+create or replace function public.end_session(p_player uuid,p_session uuid) returns jsonb
+language plpgsql set search_path='' as $$
+declare g public.game_sessions; at_time timestamptz:=clock_timestamp(); begin
+ select * into g from public.game_sessions where id=p_session and player_id=p_player for update;
+ if not found then raise exception 'SESSION_NOT_FOUND'; end if;
+ if g.state in ('created','preparing') then
+  perform public.release_unstarted_session(g.id);
+ elsif g.state='active' then
+  update public.game_sessions set state='ended',ended_at=least(at_time,started_at+interval '180 seconds'),updated_at=at_time where id=g.id;
+ elsif g.state not in ('ended','scored','abandoned') then raise exception 'NOT_ACTIVE'; end if;
+ insert into public.session_updates(session_id,kind) values(g.id,'state');
+ return '{}';
+end $$;
+
+create or replace function public.agent_lifecycle(p_player uuid,p_session uuid,p_action text,p_agent text default null) returns jsonb language plpgsql set search_path='' as $$
+declare g public.game_sessions; a public.agent_runs; begin
+ select * into g from public.game_sessions where id=p_session and player_id=p_player for update;
+ if not found then raise exception 'SESSION_NOT_FOUND'; end if;
+ select * into a from public.agent_runs where session_id=g.id;
+ if p_action='claim' then
+  if g.state not in ('created','preparing','active') then raise exception 'NOT_ACTIVE'; end if;
+  if a.session_id is not null then return jsonb_build_object('claimed',false,'state',a.state,'agentId',a.agent_id); end if;
+  insert into public.agent_runs(session_id,state) values(g.id,'starting');
+  update public.game_sessions set state='preparing',updated_at=now() where id=g.id;
+  return jsonb_build_object('claimed',true);
+ elsif p_action='commit' then
+  if g.state<>'preparing' or a.state is distinct from 'starting' or p_agent is null then raise exception 'AGENT_STATE_CONFLICT'; end if;
+  update public.agent_runs set state='running',agent_id=p_agent,updated_at=now() where session_id=g.id;
+ elsif p_action='ready' then
+  if g.state not in ('preparing','active') or a.state is distinct from 'running' or a.agent_id is null then raise exception 'AGENT_NOT_READY'; end if;
+  if g.state='preparing' then update public.game_sessions set state='active',started_at=clock_timestamp(),updated_at=now() where id=g.id; end if;
+ elsif p_action='stop' then
+  if a.agent_id is not null and a.state<>'stopped' then
+   update public.agent_runs set state='stopping',updated_at=now() where session_id=g.id;
+   return jsonb_build_object('agentId',a.agent_id);
+  end if;
+ elsif p_action='stopped' then update public.agent_runs set state='stopped',updated_at=now() where session_id=g.id;
+ elsif p_action='failed' then
+  -- Fail closed on the run: an ambiguous timeout may have started a remote agent, so it
+  -- is never retried. Its provider expiry bounds the cost. The player is released.
+  update public.agent_runs set state='failed',updated_at=now() where session_id=g.id;
+  perform public.release_unstarted_session(g.id);
+ else raise exception 'UNKNOWN_ACTION'; end if;
+ insert into public.session_updates(session_id,kind) values(g.id,'state');
+ return '{}';
+end $$;
+
+-- Release sessions already trapped by a failed start.
+select public.release_unstarted_session(g.id) from public.game_sessions g
+join public.agent_runs a on a.session_id=g.id where g.state='preparing' and a.state='failed';
+
+-- Leases now only prefer distinct cases. Once every eligible case is leased, players
+-- share one instead of being refused. SKIP LOCKED still separates simultaneous joins.
+create or replace function public.assign_scenario(p_player uuid,p_key uuid) returns uuid language plpgsql set search_path='' as $$
+declare sid uuid; chosen uuid; ver int; begin
+ -- Serializes only this player's requests; no global allocation lock.
+ insert into public.players(id) values(p_player) on conflict do nothing;
+ perform 1 from public.players where id=p_player for update;
+ select session_id into sid from public.session_assignment_requests where player_id=p_player and idempotency_key=p_key;
+ if sid is not null then return sid; end if;
+ -- Reuse an unexpired open session even if a double-click used another key.
+ select id into sid from public.game_sessions where player_id=p_player and state in ('created','preparing','active') and created_at>now()-interval '10 minutes' order by created_at desc limit 1;
+ if sid is not null then
+  insert into public.session_assignment_requests(player_id,idempotency_key,session_id) values(p_player,p_key,sid);
+  return sid;
+ end if;
+ select a.scenario_id,s.version into chosen,ver from public.scenario_allocations a join public.scenarios s on s.id=a.scenario_id
+ where s.status='published' and s.validated_at is not null
+ and not exists(select 1 from public.player_scenario_history h where h.player_id=p_player and h.scenario_id=s.id)
+ order by (a.lease_until>clock_timestamp()),a.assignments,random() limit 1 for update of a,s skip locked;
+ if chosen is null then
+  if exists(select 1 from public.scenarios s where s.status='published' and not exists(select 1 from public.player_scenario_history h where h.player_id=p_player and h.scenario_id=s.id)) then raise exception 'POOL_BUSY'; end if;
+  raise exception 'POOL_EXHAUSTED';
+ end if;
+ update public.scenario_allocations set lease_until=clock_timestamp()+interval '5 minutes',assignments=assignments+1 where scenario_id=chosen;
+ insert into public.game_sessions(player_id,scenario_id,scenario_version,idempotency_key) values(p_player,chosen,ver,p_key) returning id into sid;
+ insert into public.player_scenario_history(player_id,scenario_id,session_id) values(p_player,chosen,sid);
+ insert into public.session_assignment_requests(player_id,idempotency_key,session_id) values(p_player,p_key,sid);
+ return sid;
+end $$;
+revoke all on function public.assign_scenario(uuid,uuid) from public,anon,authenticated;
+grant execute on function public.assign_scenario(uuid,uuid) to service_role;
+
+-- Provider history is polled, so a turn is timestamped when synced rather than when
+-- spoken. A 15-second grace lets the final sync record what was said before the deadline.
+create or replace function public.session_action(p_player uuid,p_session uuid,p_action text,p_payload jsonb default '{}') returns jsonb language plpgsql set search_path='' as $$
+declare g public.game_sessions; d jsonb; f jsonb; e jsonb; ev public.session_events; v public.verdicts;
+ ids text[]; known text[]; n int; vp int; ep int; fp int; tp int; at_time timestamptz;
+begin
+ select * into g from public.game_sessions where id=p_session and player_id=p_player for update;
+ if not found then raise exception 'SESSION_NOT_FOUND'; end if;
+ -- Measure after acquiring the row lock: queued calls cannot reuse a pre-lock clock.
+ at_time:=clock_timestamp();
+ select dossier into d from public.scenario_secrets where scenario_id=g.scenario_id;
+ if p_action='read' then return jsonb_build_object('session',to_jsonb(g),'scenario',d,'factIds',coalesce((select jsonb_agg(fact_id) from public.session_facts where session_id=g.id),'[]'),'score',(select to_jsonb(s) from public.scores s where s.session_id=g.id),'verdict',(select to_jsonb(verdict_row) from public.verdicts verdict_row where verdict_row.session_id=g.id));
+ elsif p_action='start' then
+  if g.state='created' then update public.game_sessions set state='active',started_at=at_time,updated_at=at_time where id=g.id; end if;
+ elsif p_action='end' then
+  if g.state='active' then update public.game_sessions set state='ended',ended_at=least(at_time,g.started_at+interval '180 seconds'),updated_at=at_time where id=g.id;
+  elsif g.state not in ('ended','scored') then raise exception 'NOT_ACTIVE'; end if;
+ elsif p_action='turn' then
+  if g.state<>'active' or at_time>=g.started_at+interval '195 seconds' then raise exception 'NOT_ACTIVE'; end if;
+  select * into ev from public.session_events where session_id=g.id and turn_id=p_payload->>'turnId';
+  if found then
+   if ev.transcript<>p_payload->>'transcript' or ev.actor<>p_payload->>'actor' or ev.source<>p_payload->>'source' then raise exception 'TURN_CONFLICT'; end if;
+  else insert into public.session_events(session_id,turn_id,actor,transcript,source) values(g.id,p_payload->>'turnId',p_payload->>'actor',p_payload->>'transcript',p_payload->>'source'); end if;
+ elsif p_action='fact' then
+  if exists(select 1 from public.session_facts where session_id=g.id and fact_id=p_payload->>'factId') then return '{}'; end if;
+  if g.state<>'active' or at_time>=g.started_at+interval '195 seconds' then raise exception 'NOT_ACTIVE'; end if;
+  select private_data into f from public.scenario_facts where scenario_id=g.scenario_id and id=p_payload->>'factId';
+  if not found then raise exception 'UNKNOWN_FACT'; end if;
+  select * into ev from public.session_events where session_id=g.id and turn_id=p_payload->>'turnId' and actor='suspect' and source=p_payload->>'source';
+  if not found or ev.created_at<g.started_at or ev.created_at>=g.started_at+interval '195 seconds' then raise exception 'UNVERIFIED_DISCLOSURE'; end if;
+  -- Conservative MVP: full canonical disclosure sentence, not a substring in a denial.
+  if not exists(select 1 from jsonb_array_elements_text(f->'disclosurePhrases') p where lower(trim(p))=lower(trim(ev.transcript))) then raise exception 'UNSUPPORTED_DISCLOSURE'; end if;
+  if exists(select 1 from jsonb_array_elements_text(f->'prerequisiteFactIds') p where not exists(select 1 from public.session_facts sf where sf.session_id=g.id and sf.fact_id=p)) then raise exception 'FACT_LOCKED'; end if;
+  insert into public.session_facts(session_id,scenario_id,fact_id,turn_id) values(g.id,g.scenario_id,p_payload->>'factId',ev.turn_id) on conflict do nothing;
+  for e in select private_data from public.secret_evidence where scenario_id=g.scenario_id loop
+   if not exists(select 1 from jsonb_array_elements_text(e->'trigger'->'allFactIds') p where not exists(select 1 from public.session_facts sf where sf.session_id=g.id and sf.fact_id=p)) then
+    insert into public.session_clues(session_id,scenario_id,evidence_id,public_data) values(g.id,g.scenario_id,e->>'id',(e-'interpretation'-'trigger')||case when e->>'category'='red_herring' then '{"category":"testimony"}'::jsonb else '{}'::jsonb end) on conflict do nothing;
+   end if;
+  end loop;
+  insert into public.session_updates(session_id,kind) values(g.id,'clues_and_suggestions');
+ elsif p_action='verdict' then
+  select array_agg(distinct value order by value) into ids from jsonb_array_elements_text(p_payload->'evidenceIds'); ids:=coalesce(ids,'{}');
+  select * into v from public.verdicts where session_id=g.id;
+  if found then
+   if v.verdict<>p_payload->>'verdict' or v.evidence_ids<>ids or coalesce(v.reasoning,'')<>coalesce(p_payload->>'reasoning','') then raise exception 'VERDICT_LOCKED'; end if;
+   return '{}';
+  end if;
+  if g.state='active' and at_time>=g.started_at+interval '180 seconds' then
+   update public.game_sessions set state='ended',ended_at=started_at+interval '180 seconds',updated_at=at_time where id=g.id returning * into g;
+  end if;
+  if g.state<>'ended' then raise exception 'END_INTERROGATION_FIRST'; end if;
+  if exists(select 1 from unnest(ids) as cited(evidence_id) where not exists(select 1 from public.evidence e where e.scenario_id=g.scenario_id and e.id=cited.evidence_id) and not exists(select 1 from public.session_clues c where c.session_id=g.id and c.evidence_id=cited.evidence_id)) then raise exception 'EVIDENCE_NOT_VISIBLE'; end if;
+  vp:=case when p_payload->>'verdict'=d->'answerKey'->>'verdict' then 500 else 0 end;
+  select count(*) into n from jsonb_array_elements(d->'answerKey'->'pivotal') p where p->>'evidenceId'=any(ids);
+  ep:=floor(300.0*n/jsonb_array_length(d->'answerKey'->'pivotal'));
+  select count(*) into n from public.session_facts where session_id=g.id;
+  fp:=floor(150.0*n/jsonb_array_length(d->'knowledge'->'facts'));
+  tp:=floor(50.0*greatest(0,180-extract(epoch from (g.ended_at-g.started_at)))/180);
+  insert into public.verdicts(session_id,verdict,evidence_ids,reasoning) values(g.id,p_payload->>'verdict',ids,p_payload->>'reasoning');
+  insert into public.scores(session_id,verdict_points,evidence_points,fact_points,time_points,reason_codes) values(g.id,vp,ep,fp,tp,array[case when vp=500 then 'VERDICT_CORRECT' else 'VERDICT_INCORRECT' end]||case when ep<300 then array['PIVOTAL_EVIDENCE_MISSING'] else '{}'::text[] end);
+  update public.game_sessions set state='scored',updated_at=at_time where id=g.id;
+ else raise exception 'UNKNOWN_ACTION'; end if;
+ if p_action in ('start','end','verdict') then insert into public.session_updates(session_id,kind) values(g.id,'state'); end if;
+ return '{}';
+end $$;
+revoke all on function public.session_action(uuid,uuid,text,jsonb) from public,anon,authenticated;
+grant execute on function public.session_action(uuid,uuid,text,jsonb) to service_role;
+
 -- Generated by pnpm scenarios:seed-sql. Handcrafted, validated immutable cases.
 
 select public.publish_scenario('{"scenarioId":"11deff15-f401-4df6-ac6f-384fd3fdc04d","schemaVersion":1,"generatorVersion":"handcrafted-1","version":1,"title":"The Counterweight Receipt","genre":"cozy procedural","setting":"The fictional Brindle civic clock workshop","crime":"A brass counterweight was stolen from a sealed demonstration clock.","difficulty":"easy","estimatedDurationSeconds":180,"fingerprint":"054818793aa82dc0117eb49bcfcadc6ae9c34e35f52c3590bff7533e74137ff2","status":"validated","publicBriefing":"A brass counterweight was stolen from a sealed demonstration clock. The incident took place at The fictional Brindle civic clock workshop, shortly before the evening visitors returned. Mara Vell, the clock restorer, is the one person available for your interview. Staff have preserved the scene and collected three initial observations, but their first impressions may be incomplete. Nobody was hurt. Your task is to decide whether this suspect was responsible for the reported incident, using the records and statements you can verify. You have three minutes of conversation once the interview starts. Ask about the timing, the suspect’s work, and how the available evidence fits together. Other people may be relevant, but you cannot interview them directly. The suspect can point you toward records already held by the case team. An awkward answer is a reason to investigate, not a verdict. Explain your final decision with specific evidence.","suspect":{"id":"suspect","name":"Mara Vell","ageRange":"30–45","role":"clock restorer","avatarDescription":"Fictional adult in practical work clothes, expressive face, neutral background.","speechStyle":"Plain language, short answers, specific times when known.","attitude":"Tense, careful with words, and responsive to specific questions.","relationship":"On duty at the venue that evening."},"truth":{"guilty":true,"culpritId":"suspect","actualEvent":"Mara removed the weight through the maintenance hatch and hid it in a padded tool roll.","motive":"She wanted to sell the metal to cover a private workshop debt.","opportunity":"The incident occurred during the 19:10 visitor break.","means":"A triangular service key opened the rear hatch without disturbing the display seal.","realAlibi":"I stayed at the clock bench during the demonstration break.","explanation":"Mara removed the weight through the maintenance hatch and hid it in a padded tool roll. A triangular service key opened the rear hatch without disturbing the display seal. She wanted to sell the metal to cover a private workshop debt. The unbroken front seal does not exclude removal. The admission matches the key ledger and stopped clock. Recovery in the identified hiding place corroborates the admission. The visitor arrived after the clock stopped; pocket size supplies no access evidence.","timeline":[{"id":"time-1","actorId":"suspect","at":"2026-01-10T19:00:00Z","until":"2026-01-10T19:04:00Z","location":"entry hall","description":"The suspect arrives for the evening duty.","requiresAccess":false},{"id":"time-2","actorId":"suspect","at":"2026-01-10T19:05:00Z","until":"2026-01-10T19:15:00Z","location":"incident area","description":"I stayed at the clock bench during the demonstration break.","requiresAccess":true},{"id":"time-3","actorId":"suspect","at":"2026-01-10T19:10:00Z","until":"2026-01-10T19:11:00Z","location":"incident area","description":"Mara removed the weight through the maintenance hatch and hid it in a padded tool roll.","requiresAccess":true},{"id":"time-4","actorId":"suspect","at":"2026-01-10T19:20:00Z","until":"2026-01-10T19:21:00Z","location":"interview room","description":"The suspect is available for interview.","requiresAccess":false}],"access":[{"actorId":"suspect","location":"incident area","from":"2026-01-10T19:00:00Z","until":"2026-01-10T20:00:00Z"},{"actorId":"other-actor","location":"incident area","from":"2026-01-10T19:00:00Z","until":"2026-01-10T20:00:00Z"}]},"knowledge":{"facts":[{"id":"fact-1","statement":"The rear maintenance hatch bypasses the front seal.","disclosurePhrases":["The rear maintenance hatch bypasses the front seal."],"prerequisiteFactIds":[]},{"id":"fact-2","statement":"I used my triangular key at 19:10 and wrapped the weight in my tool roll.","disclosurePhrases":["I used my triangular key at 19:10 and wrapped the weight in my tool roll."],"prerequisiteFactIds":[]},{"id":"fact-3","statement":"My tool roll is still in the locked bench drawer; you may inspect it.","disclosurePhrases":["My tool roll is still in the locked bench drawer; you may inspect it."],"prerequisiteFactIds":[]},{"id":"fact-4","statement":"I had an overdue workshop debt.","disclosurePhrases":["I had an overdue workshop debt."],"prerequisiteFactIds":[]}],"knows":["fact-1","fact-2","fact-3","fact-4"],"doesNotKnow":["The private thoughts of people outside this dossier."],"admitsImmediately":["fact-1"],"revealsWhenQuestioned":["fact-2","fact-3","fact-4"],"misleading":[{"factId":"fact-4","realFact":"I had an overdue workshop debt.","permittedDeception":"I may initially decline to discuss the size of my workshop debt; I must not deny the debt or alter the removal facts."}]},"publicEvidence":[{"id":"exhibit-1","title":"The front display seal is intact","description":"The front display seal is intact.","category":"record","source":"Initial scene report","kind":"observation","interpretation":"This observation requires context; it is not itself a verdict.","availability":"public","trigger":{"allFactIds":[]}},{"id":"exhibit-2","title":"The workshop ledger assigns the triangular service","description":"The workshop ledger assigns the triangular service key to Mara.","category":"record","source":"Initial scene report","kind":"observation","interpretation":"This observation requires context; it is not itself a verdict.","availability":"public","trigger":{"allFactIds":[]}},{"id":"exhibit-3","title":"The clock stopped at 19:10, before visitors","description":"The clock stopped at 19:10, before visitors returned.","category":"record","source":"Initial scene report","kind":"observation","interpretation":"This observation requires context; it is not itself a verdict.","availability":"public","trigger":{"allFactIds":[]}}],"discoverableEvidence":[{"id":"clue-1","title":"A rear hatch provides a second route","description":"A rear hatch provides a second route into the clock.","category":"record","source":"Case record inspected after the suspect identifies it","kind":"observation","interpretation":"The unbroken front seal does not exclude removal.","availability":"discoverable","trigger":{"allFactIds":["fact-1"]}},{"id":"clue-2","title":"Mara describes removing the weight using her","description":"Mara describes removing the weight using her assigned key.","category":"record","source":"Case record inspected after the suspect identifies it","kind":"character_claim","interpretation":"The admission matches the key ledger and stopped clock.","availability":"discoverable","trigger":{"allFactIds":["fact-2"]}},{"id":"clue-3","title":"Inspection of the indicated drawer finds the","description":"Inspection of the indicated drawer finds the weight inside the padded roll.","category":"record","source":"Case record inspected after the suspect identifies it","kind":"observation","interpretation":"Recovery in the identified hiding place corroborates the admission.","availability":"discoverable","trigger":{"allFactIds":["fact-3"]}}],"redHerrings":[{"id":"report-1","title":"An awkward detail","description":"A visitor wore a coat with unusually large pockets.","category":"red_herring","source":"Initial witness report","kind":"character_claim","interpretation":"The visitor arrived after the clock stopped; pocket size supplies no access evidence.","availability":"public","trigger":{"allFactIds":[]}}],"suggestedQuestions":[{"id":"question-1","text":"How do you explain this observation: “The front display seal is intact.”?","category":"evidence","priority":1,"prerequisiteIds":[],"revealsFactIds":["fact-1"],"spoilerSafety":"safe"},{"id":"question-2","text":"As the clock restorer, what records can verify your movements around 19:10?","category":"alibi","priority":2,"prerequisiteIds":[],"revealsFactIds":["fact-2"],"spoilerSafety":"safe"},{"id":"question-3","text":"What could explain the reported incident at The fictional Brindle civic clock workshop?","category":"access","priority":3,"prerequisiteIds":[],"revealsFactIds":["fact-3"],"spoilerSafety":"safe"},{"id":"question-4","text":"Is there something personal making you reluctant to explain?","category":"motive","priority":4,"prerequisiteIds":[],"revealsFactIds":["fact-4"],"spoilerSafety":"safe"},{"id":"question-5","text":"How does that new lead fit the original scene report?","category":"follow_up","priority":1,"prerequisiteIds":["clue-1"],"revealsFactIds":["fact-2"],"spoilerSafety":"contextual"},{"id":"question-6","text":"Where can the case team verify the record you mentioned?","category":"timeline","priority":2,"prerequisiteIds":["fact-2"],"revealsFactIds":["fact-3"],"spoilerSafety":"contextual"}],"answerKey":{"verdict":"guilty","pivotal":[{"evidenceId":"clue-1","why":"The unbroken front seal does not exclude removal."},{"evidenceId":"clue-2","why":"The admission matches the key ledger and stopped clock."},{"evidenceId":"clue-3","why":"Recovery in the identified hiding place corroborates the admission."}],"misleading":[{"evidenceId":"report-1","why":"The visitor arrived after the clock stopped; pocket size supplies no access evidence."}]},"solvabilityPath":[{"questionId":"question-1","alternativePhrasings":["What does the first observation mean: The front display seal is intact.","Could the initial scene report have another explanation?"],"expectedFactIds":["fact-1"],"why":"The unbroken front seal does not exclude removal."},{"questionId":"question-2","alternativePhrasings":["Where were you at ten past seven?","What independent record supports your account of the evening?"],"expectedFactIds":["fact-2"],"why":"The admission matches the key ledger and stopped clock."},{"questionId":"question-3","alternativePhrasings":["What should the case team inspect to establish what actually happened?","How can we check the method and person responsible?"],"expectedFactIds":["fact-3"],"why":"Recovery in the identified hiding place corroborates the admission."}],"scoring":{"version":1,"verdict":500,"evidence":300,"facts":150,"time":50}}'::jsonb) where not exists(select 1 from public.scenarios where fingerprint='054818793aa82dc0117eb49bcfcadc6ae9c34e35f52c3590bff7533e74137ff2');
@@ -472,6 +691,6 @@ where schemaname='public' and tablename=any(array['players','scenarios','scenari
 select count(*) as published_fixture_count from public.scenarios where status='published' and generator_version='handcrafted-1';
 select count(*) as enabled_avatar_count from public.avatar_catalog where enabled;
 select p.proname,has_function_privilege('anon',p.oid,'EXECUTE') as anon_can_execute,has_function_privilege('authenticated',p.oid,'EXECUTE') as browser_can_execute
-from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='public' and p.proname=any(array['freeze_scenario_content','publish_scenario','assign_scenario','session_action','read_leaderboard','agent_lifecycle','assign_session_avatar','freeze_session_assignment','freeze_avatar_identity']);
+from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='public' and p.proname=any(array['freeze_scenario_content','publish_scenario','assign_scenario','session_action','read_leaderboard','agent_lifecycle','assign_session_avatar','freeze_session_assignment','freeze_avatar_identity','end_session','release_unstarted_session']);
 select role_name,table_name,has_table_privilege(role_name,'public.'||table_name,'SELECT') as can_select
 from unnest(array['anon','authenticated']) role_name cross join unnest(array['scenario_secrets','secret_evidence','scenario_facts','suggested_questions','session_events','session_facts','verdicts','scores','agent_runs','scenario_generation_jobs','scenario_allocations','session_assignment_requests','avatar_catalog']) table_name;

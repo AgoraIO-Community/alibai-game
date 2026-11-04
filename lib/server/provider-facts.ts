@@ -5,6 +5,8 @@ import { matchProviderDisclosure } from '../scenarios/provider-disclosures';
 import { GameError, rest } from './db';
 import { loadSession, readProjection, recordFactRevealed, recordTranscriptTurn } from './game';
 
+const SKIPPABLE = new Set(['UNSUPPORTED_DISCLOSURE', 'UNVERIFIED_DISCLOSURE', 'TURN_CONFLICT', 'FACT_LOCKED']);
+
 /**
  * Owner-authenticated polling trigger only: accepts no transcript or fact IDs.
  * Provider memory verifies model output, not audio delivery (managed history has
@@ -26,10 +28,18 @@ export async function syncProviderFacts(playerId: string, sessionId: string) {
     if (!fact) continue;
     // History has no stable managed turn IDs and its window shifts. Hash exact
     // text with agent ID, not array index; repeated disclosures earn no points.
-    const turnId = `agora-history-${createHash('sha256').update(agentId).update('\0').update(message.content).digest('hex')}`;
-    await recordTranscriptTurn(sessionId, { turnId, actor: 'suspect', transcript: message.content, source });
-    await recordFactRevealed(sessionId, fact.id, turnId, source);
-    discovered.add(fact.id);
+    // Postgres trim() strips only spaces, so store the text the matcher actually compared.
+    const transcript = message.content.trim();
+    const turnId = `agora-history-${createHash('sha256').update(agentId).update('\0').update(transcript).digest('hex')}`;
+    try {
+      await recordTranscriptTurn(sessionId, { turnId, actor: 'suspect', transcript, source });
+      await recordFactRevealed(sessionId, fact.id, turnId, source);
+      discovered.add(fact.id);
+    } catch (error) {
+      // This turn stays in history, so a rejection must not block the turns after it.
+      if (!(error instanceof GameError) || !SKIPPABLE.has(error.code)) throw error;
+      console.error('Provider disclosure rejected', error.code);
+    }
   }
   return readProjection(playerId, sessionId);
 }
