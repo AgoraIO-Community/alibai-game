@@ -5,9 +5,9 @@
 @custom-variant dark (&:is(.dark *));
 
 @theme inline {
-  --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
-  --font-display: var(--font-cormorant), Georgia, 'Times New Roman', serif;
-  --font-mono: var(--font-plex-mono), ui-monospace, 'SFMono-Regular', monospace;
+  --font-sans: 'Arial', ui-sans-serif, system-ui, sans-serif;
+  --font-display: 'Palatino Linotype', 'Book Antiqua', Palatino, Georgia, serif;
+  --font-mono: 'SFMono-Regular', Consolas, 'Liberation Mono', ui-monospace, monospace;
 
   --color-sidebar-ring: var(--sidebar-ring);
   --color-sidebar-border: var(--sidebar-border);

@@ -1,0 +1,56 @@
+'use client'
+
+export interface PublicEvidence {
+  id: string
+  title: string
+  description: string
+  category: string
+  source: string
+  kind: 'observation' | 'character_claim'
+  availability: 'public' | 'discoverable'
+}
+export interface PublicQuestion { id: string; text: string; category: string }
+export interface Briefing {
+  sessionId: string
+  caseId: string
+  title: string
+  publicBriefing: string
+  publicSuspect: { avatarId: string; voiceId: string; id: string; name: string; role: string; relationship: string; avatarDescription: string }
+  publicEvidence: PublicEvidence[]
+  initialSuggestedQuestions: PublicQuestion[]
+}
+export interface SessionView {
+  session: { id: string; state: string; started_at: string | null; ended_at: string | null }
+  briefing: Briefing
+  notebook: PublicEvidence[]
+  suggestions: { questions: PublicQuestion[]; more: number | null }
+  results?: {
+    correctVerdict: 'guilty' | 'innocent'
+    explanation: string
+    score: { verdict_points: number; evidence_points: number; fact_points: number; time_points: number; total: number; reason_codes: string[] }
+    citedEvidence: PublicEvidence[]
+    missedImportantClues: { evidence: PublicEvidence; why: string }[]
+  }
+}
+const messages: Record<string, string> = {
+  LOGIN_REQUIRED: 'Please sign in at the rules page to continue.',
+  INVALID_LOGIN: 'Sign in failed. Check your email, password and email confirmation.',
+  SIGNUP_FAILED: 'Could not create your account. Check your details or try signing in.',
+  AVATAR_POOL_EMPTY: 'No interview avatars are currently available. Please try again later.',
+  POOL_EXHAUSTED: 'You have investigated every available case. Please return when the bureau adds more.',
+  POOL_BUSY: 'Every available case is currently reserved. Please try again shortly.',
+  SESSION_NOT_FOUND: 'This case is unavailable for your detective identity. Return to the rules to start a new case.',
+  END_INTERROGATION_FIRST: 'End the interrogation before filing your verdict.',
+  VERDICT_LOCKED: 'Your verdict is already filed. Open the results to review it.',
+  MEDIA_NOT_CONFIGURED: 'The voice interview is not configured yet. Your case is saved and the clock has not started.',
+}
+export async function gameRequest<T>(path: string, init: RequestInit = {}): Promise<T> {
+  const response = await fetch(path, { ...init, credentials: 'same-origin', cache: 'no-store', headers: { 'Content-Type': 'application/json', ...init.headers } })
+  const body = await response.json().catch(() => ({}))
+  if (!response.ok) {
+    const code = typeof body.error === 'string' ? body.error : body.error?.code ?? body.code
+    throw new Error(messages[code] ?? 'The bureau could not complete that request. Please try again.')
+  }
+  return body as T
+}
+export const sessionRequest = <T>(id: string, action: string, body?: unknown) => gameRequest<T>(`/api/sessions/${encodeURIComponent(id)}/${action}`, body === undefined ? {} : { method: 'POST', body: JSON.stringify(body) })

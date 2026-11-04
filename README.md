@@ -31,3 +31,11 @@ To learn more, take a look at the following resources:
 - [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
 - [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
 - [v0 Documentation](https://v0.app/docs) - learn about v0 and how to use it.
+
+## Interrogate the Agent subsystem
+
+The game now uses account-owned Supabase sessions, eight immutable fixture cases, atomic pool assignment, private case dossiers, verified clue discovery and server scoring. Sign in at `/rules` to request a case; scores appear on a per-user leaderboard. Client-side demo secrets and mock scoring have been removed.
+
+Start with [integrated setup and API documentation](docs/setup.md), then [scenario authoring, validation and pool operations](docs/scenarios.md). [Agora + Anam setup](docs/agora.md) covers the selected `testing` project and managed ARES/gpt-4o-mini/MiniMax pipeline. Copy [`env.example`](env.example) to `.env.local` and keep populated secrets private.
+
+The voice server adapter and browser RTC/audio/avatar path are implemented. Trusted provider-history synchronization is connected; live end-to-end verification remains. Selecting a suggested question only highlights it and never unlocks evidence. See the setup guide for completed checks and environment blockers before deployment.

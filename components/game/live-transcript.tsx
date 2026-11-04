@@ -1,7 +1,6 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import type { MockVoiceSession } from '@/lib/agora/use-mock-voice'
 import type { TranscriptTurn, VoiceState } from '@/lib/game/types'
 import { cn } from '@/lib/utils'
 
@@ -12,7 +11,7 @@ export function LiveTranscript({
   suspectName,
   className,
 }: {
-  speaking: MockVoiceSession['speaking']
+  speaking: { text: string; startedAt: number; durationMs: number } | null
   voiceState: VoiceState
   lastSuspectTurn: TranscriptTurn | null
   suspectName: string

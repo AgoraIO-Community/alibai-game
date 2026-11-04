@@ -1,22 +1,6 @@
 import { Analytics } from '@vercel/analytics/next'
 import type { Metadata, Viewport } from 'next'
-import { Cormorant_Garamond, IBM_Plex_Mono, Inter } from 'next/font/google'
 import './globals.css'
-
-const inter = Inter({ subsets: ['latin'], variable: '--font-inter', display: 'swap' })
-const cormorant = Cormorant_Garamond({
-  subsets: ['latin'],
-  weight: ['300', '400', '500', '600', '700'],
-  style: ['normal', 'italic'],
-  variable: '--font-cormorant',
-  display: 'swap',
-})
-const plexMono = IBM_Plex_Mono({
-  subsets: ['latin'],
-  weight: ['400', '500', '600'],
-  variable: '--font-plex-mono',
-  display: 'swap',
-})
 
 export const metadata: Metadata = {
   title: 'Interrogate the Agent',
@@ -47,7 +31,7 @@ export default function RootLayout({
   children: React.ReactNode
 }>) {
   return (
-    <html lang="en" className={`${inter.variable} ${cormorant.variable} ${plexMono.variable} dark`}>
+    <html lang="en" className="dark">
       <body className="min-h-dvh antialiased font-sans">
         {children}
         {process.env.NODE_ENV === 'production' && <Analytics />}
