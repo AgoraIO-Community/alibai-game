@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 import { getSuspectProviderHistory } from '../agora/server-agent';
 import { matchProviderDisclosures } from '../scenarios/provider-disclosures';
 import { GameError, rest } from './db';
-import { loadSession, readProjection, recordFactRevealed, recordTranscriptTurn } from './game';
+import { loadSession, projectSnapshot, readProjection, recordFactRevealed, recordTranscriptTurn } from './game';
 
 const SKIPPABLE = new Set(['UNSUPPORTED_DISCLOSURE', 'UNVERIFIED_DISCLOSURE', 'TURN_CONFLICT', 'FACT_LOCKED']);
 
@@ -22,6 +22,7 @@ export async function syncProviderFacts(playerId: string, sessionId: string) {
   if (!agentId || runs[0].state !== 'running') throw new GameError('AGENT_NOT_READY', 409);
   const history = await getSuspectProviderHistory(agentId);
   const discovered = new Set(snapshot.factIds);
+  const knownBefore = discovered.size;
   const source = 'agora-provider-history';
   for (const message of history) {
     const facts = matchProviderDisclosures(snapshot.scenario, message.role, message.content, discovered);
@@ -42,5 +43,6 @@ export async function syncProviderFacts(playerId: string, sessionId: string) {
       console.error('Provider disclosure rejected', error.code);
     }
   }
-  return readProjection(playerId, sessionId);
+  // Nothing new means the snapshot still holds; projecting it stamps a fresh serverTime.
+  return discovered.size > knownBefore ? readProjection(playerId, sessionId) : projectSnapshot(snapshot, sessionId);
 }
