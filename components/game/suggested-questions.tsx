@@ -15,8 +15,8 @@ export function SuggestedQuestions({ questions, more, selectedQuestion, onSelect
 }) {
   return <section id={id} aria-labelledby="questions-heading" className={cn('flex-col border border-gold/25 bg-charcoal/30', className)}>
     <header className="shrink-0 border-b border-gold/20 px-4 py-2">
-      <h2 id="questions-heading" className="font-display text-lg leading-tight text-ivory sm:text-xl">Questions to say aloud</h2>
-      <p className="mt-0.5 text-xs text-ivory/55">Choose a hint to highlight it. This does not send a message or discover evidence.</p>
+      <h2 id="questions-heading" className="font-display text-lg leading-tight text-ivory xl:text-xl">Questions to say aloud</h2>
+      <p className="mt-0.5 text-xs text-ivory/55">Choose a hint to highlight it. Nothing is sent until you say it.</p>
     </header>
     <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-3 py-3">
       <ol className="flex flex-col gap-2.5">{questions.map((q, index) => {

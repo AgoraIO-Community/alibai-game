@@ -14,10 +14,10 @@ export function DetectiveNotebook({ items, onRefresh, id, className, children }:
   return <section id={id} aria-labelledby="notebook-heading" className={cn('flex-col border border-gold/25 bg-charcoal/30', className)}>
     <header className="flex shrink-0 items-center justify-between gap-3 border-b border-gold/20 px-4 py-2">
       <div className="min-w-0">
-        <h2 id="notebook-heading" className="font-display text-lg leading-tight text-ivory sm:text-xl">Detective’s Notebook</h2>
+        <h2 id="notebook-heading" className="font-display text-lg leading-tight text-ivory xl:text-xl">Detective’s Notebook</h2>
         <p className="label-mono mt-0.5 text-ivory/50">{items.length === 0 ? 'No entries' : items.length === 1 ? '1 entry' : `${items.length} entries`}</p>
       </div>
-      <button type="button" onClick={onRefresh} className="min-h-11 shrink-0 px-2 text-sm text-gold underline underline-offset-4 hover:text-ivory focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gold">Refresh notebook</button>
+      <button type="button" onClick={onRefresh} className="min-h-11 shrink-0 px-2 text-sm text-gold underline underline-offset-4 hover:text-ivory focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gold" aria-label="Refresh notebook">Refresh</button>
     </header>
     <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-3 py-3">
       {items.length === 0

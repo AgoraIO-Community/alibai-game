@@ -67,8 +67,9 @@ export function InterviewScreen({ view, error, busy, clock, left, voice, questio
       </header>
       {error && <div role="alert" className="mt-3 shrink-0 border border-oxblood bg-oxblood/20 p-3 text-sm">{error}<button type="button" onClick={onRefresh} className="ml-3 underline">Retry</button></div>}
       {!view ? <p className="mt-12 label-mono">Opening case file…</p> : <>
-        <div className="mt-3 flex min-h-0 flex-1 flex-col gap-3 lg:grid lg:grid-cols-[minmax(240px,300px)_minmax(0,1fr)_minmax(260px,360px)] lg:grid-rows-[minmax(0,1fr)] lg:gap-4">
-          <section aria-label="Suspect interview" className="relative h-[42dvh] shrink-0 overflow-hidden border border-gold/40 bg-obsidian shadow-[0_0_80px_rgba(0,0,0,0.6)] lg:order-2 lg:h-auto lg:min-h-0">
+        <div className="mt-3 flex flex-1 flex-col gap-3 lg:grid lg:min-h-0 lg:grid-cols-[minmax(228px,3fr)_minmax(0,7fr)_minmax(248px,4fr)] lg:grid-rows-[minmax(0,1fr)] lg:gap-4">
+          {/* Phones: a 4:3 stage capped at 40dvh leaves room for three questions beneath. Wide screens: the grid row sets the height. */}
+          <section aria-label="Suspect interview" className="relative aspect-[4/3] max-h-[40dvh] w-full shrink-0 overflow-hidden border border-gold/40 bg-obsidian shadow-[0_0_80px_rgba(0,0,0,0.6)] lg:order-2 lg:aspect-auto lg:max-h-none lg:min-h-0">
             <div ref={voice.videoElement} className="absolute inset-0" />
             <div className="pointer-events-none absolute inset-x-0 bottom-0 h-1/3 bg-gradient-to-t from-obsidian/90 to-transparent" aria-hidden />
             <span className="pointer-events-none absolute inset-1.5 border border-gold/20" aria-hidden />
@@ -76,12 +77,12 @@ export function InterviewScreen({ view, error, busy, clock, left, voice, questio
             <span className="pointer-events-none absolute right-3 top-3 size-4 border-r border-t border-gold/70" aria-hidden />
             <span className="pointer-events-none absolute bottom-3 left-3 size-4 border-b border-l border-gold/70" aria-hidden />
             <span className="pointer-events-none absolute bottom-3 right-3 size-4 border-b border-r border-gold/70" aria-hidden />
-            <div className="pointer-events-none absolute left-5 top-5 inline-flex items-center gap-2 bg-obsidian/75 px-2.5 py-1.5" aria-hidden>
+            <div className="pointer-events-none absolute left-8 top-7 inline-flex items-center gap-2 bg-obsidian/75 px-2.5 py-1.5" aria-hidden>
               <StatusDot tone={line.tone} pulse={line.pulse} />
               <span className="label-mono text-ivory/85">{line.label}{live && voice.muted ? ' · Muted' : ''}</span>
             </div>
             {live && <figcaption className="pointer-events-none absolute inset-x-5 bottom-5">
-              <p className="font-display text-2xl leading-none text-ivory sm:text-3xl">{view.briefing.publicSuspect.name}</p>
+              <p className="truncate font-display text-2xl leading-none text-ivory xl:text-3xl">{view.briefing.publicSuspect.name}</p>
               <p className="label-mono mt-1.5 text-gold/80">{view.briefing.publicSuspect.role}</p>
             </figcaption>}
             {!live && <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center bg-obsidian/70 p-6 text-center">
@@ -92,21 +93,24 @@ export function InterviewScreen({ view, error, busy, clock, left, voice, questio
           <div role="tablist" aria-label="Interview panels" className="grid shrink-0 grid-cols-2 border border-gold/25 bg-charcoal/40 lg:hidden">
             {([['questions','Questions'],['notebook',`Notebook · ${view.notebook.length}`]] as const).map(([key,label]) => <button key={key} type="button" role="tab" id={`tab-${key}`} aria-selected={panel === key} aria-controls={`interview-${key}`} onClick={() => setPanel(key)} className={cn('label-mono min-h-11 transition-colors duration-150 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ivory', panel === key ? 'bg-gold text-obsidian' : 'text-ivory/70 hover:text-gold')}>{panel === key ? '◆ ' : ''}{label}</button>)}
           </div>
-          <SuggestedQuestions id="interview-questions" questions={questions} more={more} selectedQuestion={selectedQuestion} onSelect={onSelectQuestion} onNext={onNextQuestions} className={cn('min-h-0 flex-1 lg:order-1', panel === 'questions' ? 'flex' : 'hidden lg:flex')} />
-          <DetectiveNotebook id="interview-notebook" items={view.notebook} onRefresh={onRefresh} className={cn('min-h-0 flex-1 lg:order-3', panel === 'notebook' ? 'flex' : 'hidden lg:flex')} />
+          {/* Below lg the panel contributes only its 13rem floor to the column's minimum height (contain-size), so a
+              short viewport such as a landscape phone scrolls the room instead of crushing the panel, while a tall one never stretches. */}
+          <SuggestedQuestions id="interview-questions" questions={questions} more={more} selectedQuestion={selectedQuestion} onSelect={onSelectQuestion} onNext={onNextQuestions} className={cn('min-h-52 flex-1 contain-size lg:order-1 lg:min-h-0 lg:contain-none', panel === 'questions' ? 'flex' : 'hidden lg:flex')} />
+          <DetectiveNotebook id="interview-notebook" items={view.notebook} onRefresh={onRefresh} className={cn('min-h-52 flex-1 contain-size lg:order-3 lg:min-h-0 lg:contain-none', panel === 'notebook' ? 'flex' : 'hidden lg:flex')} />
         </div>
         <footer className="mt-3 flex shrink-0 flex-col gap-2 border-t border-gold/20 pt-2.5 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
           <div className="min-w-0 flex-1">
             <p role="status" className="flex items-center gap-2 text-xs text-gold sm:text-sm"><StatusDot tone={line.tone} pulse={line.pulse} className="shrink-0" />{voice.phase === 'live' ? 'Connected · Your microphone is live' : voice.phase === 'reconnecting' ? 'Reconnecting · The interview clock continues' : view.session.state === 'ended' || view.session.state === 'scored' ? 'Interview closed' : 'Your clock starts after audio and video connect.'}</p>
             {voice.error && <p role="alert" className="mt-1 text-xs text-ivory sm:text-sm">{voice.error}</p>}
           </div>
+          {/* On phones every action shares the row equally and labels shorten, so error states stay two rows at most. */}
           <div className="flex flex-wrap items-center gap-2 sm:justify-end">
-            {voice.audioBlocked && <Button className={goldButton} onClick={voice.resumeAudio}>Enable suspect audio</Button>}
-            {['connecting','waiting_media'].includes(voice.phase) && <button type="button" className="min-h-11 px-2 text-sm text-ivory/70 underline underline-offset-4 hover:text-ivory focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gold" onClick={onCancelConnection}>Cancel connection</button>}
-            {view.session.state === 'abandoned' && <Link className="inline-flex min-h-11 items-center px-2 text-gold underline underline-offset-4" href="/rules">Request another case</Link>}
-            {['created','preparing','active'].includes(view.session.state) && ['error','ended'].includes(voice.phase) && <Button className={goldButton} disabled={busy} onClick={onRetryConnection}>{view.session.state === 'active' ? 'Reconnect interview' : 'Retry connection'}</Button>}
-            {live && <Button className={cn(quietButton, voice.muted && 'border-gold bg-gold/15 text-ivory')} aria-pressed={voice.muted} aria-label={voice.muted ? 'Unmute microphone' : 'Mute microphone'} onClick={() => void voice.toggleMute()}>{voice.muted ? <MicOff className="size-4" aria-hidden /> : <Mic className="size-4" aria-hidden />}<span className="hidden sm:inline">{voice.muted ? 'Unmute microphone' : 'Mute microphone'}</span><span className="sm:hidden">{voice.muted ? 'Unmute' : 'Mute'}</span></Button>}
-            <Button className={cn(goldButton, 'flex-1 sm:flex-none')} disabled={busy || !['active','ended','scored'].includes(view.session.state)} onClick={onEndInterview}>End interview and file verdict</Button>
+            {voice.audioBlocked && <Button className={cn(goldButton, 'flex-1 sm:flex-none')} onClick={voice.resumeAudio}><span className="sm:hidden">Enable audio</span><span className="hidden sm:inline">Enable suspect audio</span></Button>}
+            {['connecting','waiting_media'].includes(voice.phase) && <button type="button" className="min-h-11 flex-1 px-2 text-center text-sm text-ivory/70 underline underline-offset-4 hover:text-ivory focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gold sm:flex-none" onClick={onCancelConnection}>Cancel connection</button>}
+            {view.session.state === 'abandoned' && <Link className={cn(quietButton, 'inline-flex flex-1 items-center justify-center focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gold sm:flex-none')} href="/rules"><span className="sm:hidden">New case</span><span className="hidden sm:inline">Request another case</span></Link>}
+            {['created','preparing','active'].includes(view.session.state) && ['error','ended'].includes(voice.phase) && <Button className={cn(goldButton, 'flex-1 sm:flex-none')} disabled={busy} onClick={onRetryConnection}><span className="sm:hidden">{view.session.state === 'active' ? 'Reconnect' : 'Retry'}</span><span className="hidden sm:inline">{view.session.state === 'active' ? 'Reconnect interview' : 'Retry connection'}</span></Button>}
+            {live && <Button className={cn(quietButton, 'w-12 px-0 sm:w-auto sm:px-4', voice.muted && 'border-gold bg-gold/15 text-ivory')} aria-pressed={voice.muted} aria-label={voice.muted ? 'Unmute microphone' : 'Mute microphone'} onClick={() => void voice.toggleMute()}>{voice.muted ? <MicOff className="size-4" aria-hidden /> : <Mic className="size-4" aria-hidden />}<span className="hidden sm:inline">{voice.muted ? 'Unmute microphone' : 'Mute microphone'}</span></Button>}
+            <Button className={cn(goldButton, 'flex-1 sm:flex-none')} disabled={busy || !['active','ended','scored'].includes(view.session.state)} onClick={onEndInterview}><span className="sm:hidden">End interview</span><span className="hidden sm:inline">End interview and file verdict</span></Button>
           </div>
         </footer>
       </>}
