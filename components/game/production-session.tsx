@@ -175,7 +175,7 @@ export function ProductionSession({ sessionId, mode }: { sessionId: string; mode
           <section className="deco-frame mt-8 p-5"><h2 className="font-display text-2xl">What actually happened</h2><p className="mt-4 leading-relaxed text-ivory/80">{view.results.explanation}</p></section>
           <h2 className="mt-8 font-display text-2xl">Evidence you cited</h2><EvidenceList items={view.results.citedEvidence} />
           <h2 className="mt-8 font-display text-2xl">Important clues you missed</h2><EvidenceList items={view.results.missedImportantClues.map(clue => clue.evidence)} />
-          <div className="mt-8 flex gap-6"><Link className="text-gold underline" href="/rules">Take a new case</Link><Link className="text-gold underline" href="/leaderboard">Leaderboard</Link></div>
+          <div className="mt-8 flex gap-6"><Link className="text-gold underline" href="/rules">Take a new case</Link><Link className="text-gold underline" href="/leaderboard?fresh=1">Leaderboard</Link></div>
         </> : <p>File a verdict before opening the sealed case truth. <Link className="text-gold underline" href={`/game/${sessionId}/verdict`}>Open verdict form</Link></p>)}
       </>}
     </div>
