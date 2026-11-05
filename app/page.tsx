@@ -71,7 +71,7 @@ export default function LandingPage() {
 
       <footer className="relative z-10 flex flex-col items-center gap-2 px-6 pb-8 text-center md:flex-row md:justify-between md:px-10">
         <p className="label-mono text-ivory/35">Real-time voice &middot; Three minutes &middot; One verdict</p>
-        <p className="label-mono text-ivory/35">Powered by Agora &middot; Gradium &middot; Supabase</p>
+        <p className="label-mono text-ivory/35">Powered by Supabase &middot; Agora &middot; Anam &middot; Secured by Sodabase</p>
       </footer>
     </main>
   )
