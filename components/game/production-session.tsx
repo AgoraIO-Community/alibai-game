@@ -7,6 +7,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { gameRequest, sessionRequest, type PublicEvidence, type PublicQuestion, type SessionView } from '@/lib/game/api'
 import { DecoRule, Eyebrow } from './deco'
+import { InterviewScreen } from './interview-screen'
 import { useSuspectVoice } from '@/lib/agora/use-suspect-voice'
 
 const buttonClass = 'min-h-12 rounded-none bg-gold px-6 font-mono text-xs uppercase tracking-widest text-obsidian hover:bg-ivory'
@@ -124,6 +125,12 @@ export function ProductionSession({ sessionId, mode }: { sessionId: string; mode
     void voice.start()
   }, [mode, view?.session.state, voice.phase, voice.start, left])
 
+  // The room has its own one-viewport layout; the handlers stay here so the dossier pages share them.
+  if (mode === 'interview') return <InterviewScreen view={view} error={error} busy={busy} clock={clock} left={left} voice={voice}
+    questions={questions} more={more} selectedQuestion={selectedQuestion} onSelectQuestion={setSelectedQuestion} onNextQuestions={() => void nextQuestions()} onRefresh={() => void refresh()}
+    onCancelConnection={async()=>{await voice.disconnect();await action('end')}}
+    onRetryConnection={async () => { await voice.disconnect(); await voice.start() }}
+    onEndInterview={async () => { if(!view) return; if(view.session.state === 'scored') router.push(`/game/${sessionId}/results`); else if(view.session.state === 'ended' || await action('end')) { await voice.disconnect(); router.push(`/game/${sessionId}/verdict`) } }} />
 
   return <main className="min-h-dvh bg-obsidian spotlight px-5 pb-16 pt-6 text-ivory">
     <div className="mx-auto max-w-3xl">
@@ -139,33 +146,6 @@ export function ProductionSession({ sessionId, mode }: { sessionId: string; mode
           <h2 className="mt-8 font-display text-2xl">Evidence on file</h2><EvidenceList items={view.briefing.publicEvidence} />
           <p className="mt-6 text-sm text-ivory/55">Your three-minute clock begins only when the interview starts.</p>
           <Button className={`${buttonClass} mt-5`} onClick={() => router.push(`/game/${sessionId}`)}>Enter interrogation room</Button>
-        </>}
-        {mode === 'interview' && <>
-          <section className="deco-frame overflow-hidden bg-charcoal/30" aria-label="Suspect interview">
-            <div className="relative aspect-[3/4] max-h-[60dvh] w-full bg-obsidian">
-              <div ref={voice.videoElement} className="absolute inset-0" />
-              {!['live','reconnecting'].includes(voice.phase) && <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center bg-obsidian/70 p-6 text-center">
-                <p className="font-display text-3xl">{view.briefing.publicSuspect.name}</p>
-                <p className="mt-4 max-w-md text-sm text-ivory/60">{voice.phase === 'connecting' ? 'Opening a secure line…' : voice.phase === 'waiting_media' ? 'Waiting for the suspect’s audio and avatar…' : ['error','ended'].includes(voice.phase) ? 'The line is down.' : 'Opening a secure line…'}</p>
-              </div>}
-            </div>
-            <div className="flex flex-col items-center gap-4 border-t border-gold/20 p-4 text-center">
-              <p role="status" className="text-sm text-gold">{voice.phase === 'live' ? 'Connected · Your microphone is live' : voice.phase === 'reconnecting' ? 'Reconnecting · The interview clock continues' : view.session.state === 'ended' || view.session.state === 'scored' ? 'Interview closed' : 'Your clock starts after audio and video connect.'}</p>
-              {voice.error && <p role="alert" className="text-sm text-ivory">{voice.error}</p>}
-              {voice.audioBlocked && <Button className={buttonClass} onClick={voice.resumeAudio}>Enable suspect audio</Button>}
-              {['connecting','waiting_media'].includes(voice.phase) && <button type="button" className="min-h-11 text-sm text-ivory/70 underline" onClick={async()=>{await voice.disconnect();await action('end')}}>Cancel connection</button>}
-              {view.session.state === 'abandoned' && <Link className="min-h-11 text-gold underline" href="/rules">Request another case</Link>}
-
-              {['created','preparing','active'].includes(view.session.state) && ['error','ended'].includes(voice.phase) && <Button className={buttonClass} disabled={busy} onClick={async () => { await voice.disconnect(); await voice.start() }}>{view.session.state === 'active' ? 'Reconnect interview' : 'Retry connection'}</Button>}
-              {['live','reconnecting'].includes(voice.phase) && <Button className={buttonClass} onClick={() => void voice.toggleMute()}>{voice.muted ? 'Unmute microphone' : 'Mute microphone'}</Button>}
-            </div>
-          </section>
-          <section className="mt-8"><h2 className="font-display text-2xl">Questions to say aloud</h2><p className="mt-2 text-xs text-ivory/55">Choose a hint to highlight it. This does not send a message or discover evidence.</p>
-            <div className="mt-4 flex flex-col gap-3">{questions.map(q => <button key={q.id} type="button" aria-pressed={selectedQuestion === q.id} onClick={() => setSelectedQuestion(q.id)} className={`min-h-14 border p-4 text-left text-sm ${selectedQuestion === q.id ? 'border-gold bg-gold/15' : 'border-ivory/20 bg-charcoal/30'}`}>{q.text}</button>)}</div>
-            <button type="button" className="mt-4 min-h-11 text-sm text-gold underline" onClick={() => void nextQuestions()}>{more === null ? 'Starting questions' : 'More questions'}</button>
-          </section>
-          <section className="mt-8"><div className="flex items-center justify-between"><h2 className="font-display text-2xl">Detective’s Notebook</h2><button type="button" className="min-h-11 text-sm text-gold underline" onClick={() => void refresh()}>Refresh notebook</button></div><EvidenceList items={view.notebook} /></section>
-          <Button className={`${buttonClass} mt-8`} disabled={busy || !['active','ended','scored'].includes(view.session.state)} onClick={async () => { if(view.session.state === 'scored') router.push(`/game/${sessionId}/results`); else if(view.session.state === 'ended' || await action('end')) { await voice.disconnect(); router.push(`/game/${sessionId}/verdict`) } }}>End interview and file verdict</Button>
         </>}
         {mode === 'verdict' && <>
           {view.session.state === 'scored' ? <Link className="text-gold underline" href={`/game/${sessionId}/results`}>Your verdict is locked. View results.</Link> : !['ended','active'].includes(view.session.state) ? <p>The interrogation has not started. <Link className="text-gold underline" href={`/game/${sessionId}`}>Return to the room.</Link></p> : <>
