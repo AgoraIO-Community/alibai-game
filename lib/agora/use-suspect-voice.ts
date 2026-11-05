@@ -84,7 +84,7 @@ export function useSuspectVoice(sessionId: string, onReady: () => Promise<void>)
       marks.mark('mic')
       const credentials = await sessionRequest<RtcCredentials>(sessionId, 'agent', {}).catch(error => { agentFailed = true; throw error })
       agentRequested = true; hasAgent.current = true
-      marks.mark('agent')
+      marks.mark('agent-response')
       if (!isCurrent()) { await releaseMedia(); void endSession().catch(()=>{}); return }
       const client = AgoraRTC.createClient({ mode:'rtc', codec:'h264' })
       clientRef.current = client
@@ -115,11 +115,16 @@ export function useSuspectVoice(sessionId: string, onReady: () => Promise<void>)
         } finally { readyInFlight = false }
       }
       AgoraRTC.onAudioAutoplayFailed = () => { if(isCurrent()) { failedAutoplay = true; setAudioBlocked(true) } }
+      const remoteRole = (uid: unknown) => Number(uid) === credentials.avatarUid ? 'avatar' : 'agent'
+      client.on('user-joined', user => {
+        if ([credentials.agentUid,credentials.avatarUid].includes(Number(user.uid))) marks.mark(`${remoteRole(user.uid)}-joined`)
+      })
       // Register before join to catch tracks from the already-starting cloud agent.
       client.on('user-published', async (user, mediaType) => {
         if (!isCurrent() || (mediaType !== 'audio' && mediaType !== 'video')) return
         if (![credentials.agentUid,credentials.avatarUid].includes(Number(user.uid))) return
         if (mediaType === 'video' && Number(user.uid) !== credentials.avatarUid) return
+        marks.mark(`${remoteRole(user.uid)}-published-${mediaType}`)
         try {
           await client.subscribe(user, mediaType)
           if(!isCurrent()) return
@@ -127,12 +132,12 @@ export function useSuspectVoice(sessionId: string, onReady: () => Promise<void>)
             // Prefer avatar-delayed audio if the avatar publishes it; never play both tracks.
             if(audioRef.current && Number(user.uid) !== credentials.avatarUid) return
             audioRef.current?.stop(); audioRef.current = user.audioTrack
-            user.audioTrack.on('first-frame-decoded', () => { marks.mark('first-audio'); audioDecoded = true; void markReady() })
+            user.audioTrack.on('first-frame-decoded', () => { marks.mark(`${remoteRole(user.uid)}-decoded-audio`); audioDecoded = true; void markReady() })
             user.audioTrack.play()
           }
           if(mediaType === 'video' && user.videoTrack) {
             videoRef.current = user.videoTrack
-            user.videoTrack.on('first-frame-decoded', () => { marks.mark('first-video'); videoDecoded = true; void markReady() })
+            user.videoTrack.on('first-frame-decoded', () => { marks.mark(`${remoteRole(user.uid)}-decoded-video`); videoDecoded = true; void markReady() })
             if(videoElement.current) user.videoTrack.play(videoElement.current, { fit:'contain' })
           }
         } catch { if(isCurrent()) setError('A remote media track could not be opened. Check your connection and retry.') }
@@ -158,10 +163,10 @@ export function useSuspectVoice(sessionId: string, onReady: () => Promise<void>)
         },
       })
       await client.join(credentials.appId, credentials.channel, credentials.rtcToken, credentials.uid)
-      marks.mark('join')
+      marks.mark('player-joined')
       if(!isCurrent()) { await releaseMedia(); return }
       await client.publish(microphone)
-      marks.mark('publish')
+      marks.mark('mic-published')
       published = true; setPhase('waiting_media'); void markReady()
       // Decode is the readiness gate. The player gets an explicit retry if no media arrives.
       timeoutRef.current = setTimeout(() => {

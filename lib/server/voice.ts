@@ -11,7 +11,7 @@ export async function startVoice(playerId:string,sessionId:string,timer:StepTime
  let agentId:string|undefined;
  try{
   const instructions=await timer.step('context',()=>buildSuspectAgentContext(sessionId));
-  const started=await timer.step('agent-start',()=>startSuspectAgent({sessionId,avatarId:assigned.session.avatar_id,voiceId:assigned.session.minimax_voice_id,instructions}));agentId=started.agentId;
+  const started=await timer.step('agora-start',()=>startSuspectAgent({sessionId,avatarId:assigned.session.avatar_id,voiceId:assigned.session.minimax_voice_id,instructions}));agentId=started.agentId;
   await timer.step('commit',()=>lifecycle(playerId,sessionId,'commit',agentId));
   return createPlayerRtcCredentials(sessionId);
  }catch(error){if(agentId)await stopSuspectAgent(agentId).catch(()=>{});await lifecycle(playerId,sessionId,'failed').catch(()=>{});throw error}

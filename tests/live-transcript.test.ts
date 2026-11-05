@@ -211,3 +211,10 @@ test('only a confirmed end stops the unmount cleanup from sending another', asyn
   assert.match(session, /if\(actionName === 'end'\) applyView\(await voice\.endSession\(\)\)/);
   assert.doesNotMatch(session, /sessionRequest(?:<\w+>)?\(sessionId,\s*'end'/);
 });
+test('startup marks keep the agent start, remote join, publish and decode apart', async () => {
+  const [hook, voice] = await Promise.all(['lib/agora/use-suspect-voice.ts', 'lib/server/voice.ts'].map(path => readFile(path, 'utf8')));
+  assert.match(voice, /timer\.step\('agora-start',\(\)=>startSuspectAgent/);
+  assert.match(hook, /client\.on\('user-joined'[\s\S]{0,160}-joined`\)/);
+  for (const mark of ['agent-response', 'player-joined', 'mic-published']) assert.ok(hook.includes(`marks.mark('${mark}')`), mark);
+  for (const mark of ['-published-${mediaType}', '-decoded-audio', '-decoded-video']) assert.ok(hook.includes(mark), mark);
+});
