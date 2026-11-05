@@ -37,15 +37,23 @@ export function channelForSession(sessionId: string): string {
   return `case-${sessionIdSchema.parse(sessionId)}`;
 }
 
+// RTM allows one login per user ID across the whole Agora project, unlike RTC UIDs, which
+// are scoped to a channel. Deriving it from the session keeps concurrent players from
+// kicking each other, and keeps it stable so a renewed token matches the live client.
+function rtmUidForSession(sessionId: string): string {
+  return `player-${sessionIdSchema.parse(sessionId)}`;
+}
+
 /** Server-only. The caller must authenticate session ownership before returning this DTO. */
 export function createPlayerRtcCredentials(sessionId: string) {
   const { appId, appCertificate } = config();
   const channel = channelForSession(sessionId);
+  const rtmUid = rtmUidForSession(sessionId);
   // Separate RTC and RTM tokens avoid giving the browser a ConvoAI REST auth token.
   const rtcToken = RtcTokenBuilder.buildTokenWithUid(appId, appCertificate, channel, CLIENT_UID,
     RtcRole.PUBLISHER, TOKEN_SECONDS, TOKEN_SECONDS);
-  const rtmToken = RtmTokenBuilder.buildToken(appId, appCertificate, String(CLIENT_UID), TOKEN_SECONDS);
-  return { appId, channel, uid: CLIENT_UID, rtmUid: String(CLIENT_UID), rtcToken, rtmToken,
+  const rtmToken = RtmTokenBuilder.buildToken(appId, appCertificate, rtmUid, TOKEN_SECONDS);
+  return { appId, channel, uid: CLIENT_UID, rtmUid, rtcToken, rtmToken,
     agentUid: Number(AGENT_UID), avatarUid: AVATAR_UID, expiresAt: Date.now() + TOKEN_SECONDS * 1000 };
 }
 

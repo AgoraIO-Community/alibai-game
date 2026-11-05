@@ -3,26 +3,32 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { IAgoraRTCClient, IMicrophoneAudioTrack, IRemoteAudioTrack, IRemoteVideoTrack } from 'agora-rtc-sdk-ng'
 import { sessionRequest } from '@/lib/game/api'
+import { connectLiveTranscript, type LiveTranscript, type TranscriptLine, type TranscriptStatus } from '@/lib/agora/live-transcript'
 
 interface RtcCredentials {
-  appId: string; channel: string; uid: number; rtcToken: string
+  appId: string; channel: string; uid: number; rtcToken: string; rtmUid: string; rtmToken: string
   agentUid: number; avatarUid: number; expiresAt: number
 }
 type Phase = 'idle' | 'connecting' | 'waiting_media' | 'live' | 'reconnecting' | 'ended' | 'error'
 
 /** Media lifecycle adapted from the official Next.js ConversationComponent and RTC Web skill.
- * No browser transcript or fact writes: discovery remains a trusted server responsibility.
+ * Live captions are display only. No transcript or fact leaves the browser: discovery remains
+ * a trusted server responsibility, and captions take no part in the readiness gate.
  */
 export function useSuspectVoice(sessionId: string, onReady: () => Promise<void>) {
   const [phase, setPhase] = useState<Phase>('idle')
   const [error, setError] = useState('')
   const [muted, setMuted] = useState(false)
   const [audioBlocked, setAudioBlocked] = useState(false)
+  const [transcript, setTranscript] = useState<TranscriptLine[]>([])
+  const [transcriptStatus, setTranscriptStatus] = useState<TranscriptStatus>('idle')
   const videoElement = useRef<HTMLDivElement | null>(null)
   const clientRef = useRef<IAgoraRTCClient | null>(null)
   const microphoneRef = useRef<IMicrophoneAudioTrack | null>(null)
   const audioRef = useRef<IRemoteAudioTrack | null>(null)
   const videoRef = useRef<IRemoteVideoTrack | null>(null)
+  const transcriptRef = useRef<LiveTranscript | null>(null)
+  const transcriptLines = useRef<TranscriptLine[]>([])
   const attempt = useRef(0)
   const active = useRef(false)
   const starting = useRef(false)
@@ -35,10 +41,15 @@ export function useSuspectVoice(sessionId: string, onReady: () => Promise<void>)
     if (timeoutRef.current) { clearTimeout(timeoutRef.current); timeoutRef.current = null }
     const microphone = microphoneRef.current; microphoneRef.current = null
     const client = clientRef.current; clientRef.current = null
+    const liveTranscript = transcriptRef.current; transcriptRef.current = null
+    // Started first so the toolkit detaches before the RTC listeners below are removed.
+    const transcriptReleased = liveTranscript?.release()
+    setTranscriptStatus('idle')
     audioRef.current?.stop(); audioRef.current = null
     videoRef.current?.stop(); videoRef.current = null
     if (microphone) { microphone.stop(); microphone.close() }
     if (client) { client.removeAllListeners(); await client.leave().catch(() => {}) }
+    await transcriptReleased
   }, [])
 
   const disconnect = useCallback(async () => {
@@ -110,7 +121,18 @@ export function useSuspectVoice(sessionId: string, onReady: () => Promise<void>)
         if(state === 'DISCONNECTED' && ready) { setPhase('error'); setError('The voice connection was lost. The server clock continues; reconnect or finish your verdict.') }
       })
       client.on('token-privilege-will-expire', () => {
-        void sessionRequest<RtcCredentials>(sessionId,'agent',{}).then(tokens=>client.renewToken(tokens.rtcToken)).catch(()=>setError('Connection credentials could not be renewed. Finish your interview and submit a verdict.'))
+        void sessionRequest<RtcCredentials>(sessionId,'agent',{}).then(async tokens=>{ await client.renewToken(tokens.rtcToken); await transcriptRef.current?.renewToken(tokens.rtmToken) }).catch(()=>setError('Connection credentials could not be renewed. Finish your interview and submit a verdict.'))
+      })
+      // Not awaited: captions run beside the join to catch the greeting, and can neither
+      // delay nor fail the media path. A reconnect keeps the lines already on screen.
+      const earlierLines = transcriptLines.current
+      transcriptRef.current = connectLiveTranscript({
+        rtcClient: client, appId: credentials.appId, channel: credentials.channel, rtmUid: credentials.rtmUid, rtmToken: credentials.rtmToken,
+        onStatus: setTranscriptStatus,
+        onLines: lines => {
+          transcriptLines.current = [...earlierLines, ...lines.map(line => ({ ...line, id: `${current}-${line.id}` }))]
+          setTranscript(transcriptLines.current)
+        },
       })
       await client.join(credentials.appId, credentials.channel, credentials.rtcToken, credentials.uid)
       if(!isCurrent()) { await releaseMedia(); return }
@@ -147,9 +169,10 @@ export function useSuspectVoice(sessionId: string, onReady: () => Promise<void>)
   useEffect(() => () => {
     ++attempt.current; starting.current = false; active.current = false
     void releaseMedia()
+    transcriptLines.current = []; setTranscript([])
     // Best effort only. The cleanup worker is authoritative when tabs disappear.
     if(hasAgent.current) void fetch(`/api/sessions/${encodeURIComponent(sessionId)}/end`, { method:'POST', credentials:'same-origin', headers:{'Content-Type':'application/json'},body:'{}',keepalive:true }).catch(()=>{})
   }, [sessionId,releaseMedia])
 
-  return { phase,error,muted,audioBlocked,videoElement,start,disconnect,toggleMute,resumeAudio }
+  return { phase,error,muted,audioBlocked,transcript,transcriptStatus,videoElement,start,disconnect,toggleMute,resumeAudio }
 }

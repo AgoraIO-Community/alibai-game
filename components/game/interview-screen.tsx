@@ -9,6 +9,7 @@ import type { useSuspectVoice } from '@/lib/agora/use-suspect-voice'
 import { cn } from '@/lib/utils'
 import { Eyebrow, StatusDot } from './deco'
 import { DetectiveNotebook } from './detective-notebook'
+import { NotebookTranscript } from './notebook-transcript'
 import { SuggestedQuestions } from './suggested-questions'
 
 export type SuspectVoice = ReturnType<typeof useSuspectVoice>
@@ -96,7 +97,9 @@ export function InterviewScreen({ view, error, busy, clock, left, voice, questio
           {/* Below lg the panel contributes only its 13rem floor to the column's minimum height (contain-size), so a
               short viewport such as a landscape phone scrolls the room instead of crushing the panel, while a tall one never stretches. */}
           <SuggestedQuestions id="interview-questions" questions={questions} more={more} selectedQuestion={selectedQuestion} onSelect={onSelectQuestion} onNext={onNextQuestions} className={cn('min-h-52 flex-1 contain-size lg:order-1 lg:min-h-0 lg:contain-none', panel === 'questions' ? 'flex' : 'hidden lg:flex')} />
-          <DetectiveNotebook id="interview-notebook" items={view.notebook} onRefresh={onRefresh} className={cn('min-h-52 flex-1 contain-size lg:order-3 lg:min-h-0 lg:contain-none', panel === 'notebook' ? 'flex' : 'hidden lg:flex')} />
+          <DetectiveNotebook id="interview-notebook" items={view.notebook} onRefresh={onRefresh} className={cn('min-h-52 flex-1 contain-size lg:order-3 lg:min-h-0 lg:contain-none', panel === 'notebook' ? 'flex' : 'hidden lg:flex')}>
+            <NotebookTranscript lines={voice.transcript} status={voice.transcriptStatus} suspectName={view.briefing.publicSuspect.name} />
+          </DetectiveNotebook>
         </div>
         <footer className="mt-3 flex shrink-0 flex-col gap-2 border-t border-gold/20 pt-2.5 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
           <div className="min-w-0 flex-1">
