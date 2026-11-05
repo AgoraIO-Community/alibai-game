@@ -52,4 +52,5 @@ export type Question = z.infer<typeof questionSchema>;
 export type Difficulty = z.infer<typeof difficultySchema>;
 export const allEvidence = (s: Scenario) => [...s.publicEvidence, ...s.discoverableEvidence, ...s.redHerrings];
 export const publicEvidenceDTO = (e: Evidence) => ({ id:e.id, title:e.title, description:e.description, category:e.category === 'red_herring' ? 'testimony' as const : e.category, source:e.source, kind:e.kind, availability:e.availability });
-export const questionDTO = (q: Question) => ({ id:q.id, text:q.text, category:q.category });
+// Category stays private: which kinds of question a case carries can hint at its verdict.
+export const questionDTO = (q: Question) => ({ id:q.id, text:q.text });

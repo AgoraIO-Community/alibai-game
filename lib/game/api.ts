@@ -9,7 +9,7 @@ export interface PublicEvidence {
   kind: 'observation' | 'character_claim'
   availability: 'public' | 'discoverable'
 }
-export interface PublicQuestion { id: string; text: string; category: string }
+export interface PublicQuestion { id: string; text: string }
 export interface Briefing {
   sessionId: string
   caseId: string
