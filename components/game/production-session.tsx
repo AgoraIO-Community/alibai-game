@@ -68,6 +68,8 @@ export function ProductionSession({ sessionId, mode }: { sessionId: string; mode
   }, [mode,view?.session.state,voice.phase,sessionId,applyView])
 
   useEffect(() => { void refresh() }, [refresh])
+  // Caches the SDK for the room. An import only: no client, no microphone, nothing billable.
+  useEffect(() => { if(mode === 'briefing') void import('agora-rtc-sdk-ng').catch(() => {}) }, [mode])
   useEffect(() => {
     let closed = false
     let dispose: (() => void) | undefined
