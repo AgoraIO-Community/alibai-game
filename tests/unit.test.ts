@@ -9,6 +9,7 @@ import { validateScenario, validateCaseSet } from '../lib/scenarios/validate';
 import { briefing, notebook, score, suggestions } from '../lib/scenarios/engine';
 import { generateScenario, HumanReviewRequired, StructuredJsonProvider, type JsonProvider } from '../lib/scenarios/generator';
 import type { Scenario } from '../lib/scenarios/schema';
+import { stepTimer } from '../lib/server/timing';
 const clone = (index = 0) => structuredClone(fixtures[index]);
 const validateChanged = (s: Scenario) => { s.fingerprint = fingerprint(s); return validateScenario(s); };
 test('eight diverse handcrafted mysteries satisfy the same production validator', () => {
@@ -194,4 +195,14 @@ test('scripts/data matches the migrations and cases: run pnpm data:build if this
  const cases = await readFile('scripts/data/cases.sql', 'utf8'), install = await readFile('scripts/data/install.sql', 'utf8');
  for (const s of fixtures) { assert.ok(cases.includes(s.fingerprint), s.title); assert.ok(install.includes(s.fingerprint), s.title); }
  for (const file of await readdir('supabase/migrations')) assert.ok(install.includes(file), file);
+});
+test('startup timing logs step durations only, including when a step fails', async () => {
+ const lines: string[] = [], timer = stepTimer('agent', line => lines.push(line));
+ assert.equal(await timer.step('load', async () => 'secret-value'), 'secret-value');
+ await assert.rejects(timer.step('claim', async () => { throw new Error('secret-error'); }));
+ timer.done();
+ assert.equal(lines.length, 1); assert.doesNotMatch(lines[0], /secret/);
+ const logged = JSON.parse(lines[0].replace('[timing] agent ', ''));
+ assert.deepEqual(Object.keys(logged), ['load', 'claim', 'total', 'ok']); assert.equal(logged.ok, false);
+ for (const key of ['load', 'claim', 'total']) assert.equal(typeof logged[key], 'number');
 });

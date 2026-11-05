@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import type { IAgoraRTCClient, IMicrophoneAudioTrack, IRemoteAudioTrack, IRemoteVideoTrack } from 'agora-rtc-sdk-ng'
 import { sessionRequest } from '@/lib/game/api'
 import { connectLiveTranscript, type LiveTranscript, type TranscriptLine, type TranscriptStatus } from '@/lib/agora/live-transcript'
+import { startupMarks } from '@/lib/agora/startup-marks'
 
 interface RtcCredentials {
   appId: string; channel: string; uid: number; rtcToken: string; rtmUid: string; rtmToken: string
@@ -65,14 +66,18 @@ export function useSuspectVoice(sessionId: string, onReady: () => Promise<void>)
     setError(''); setPhase('connecting'); setMuted(false); setAudioBlocked(false)
     await releaseMedia()
     let agentRequested = false, agentFailed = false
+    const marks = startupMarks()
     try {
       const AgoraRTC = (await import('agora-rtc-sdk-ng')).default
+      marks.mark('sdk-import')
       AgoraRTC.setLogLevel(3)
       const microphone = await AgoraRTC.createMicrophoneAudioTrack({ encoderConfig:'speech_standard', AEC:true, ANS:true, AGC:true })
       if (!isCurrent()) { microphone.stop(); microphone.close(); return }
       microphoneRef.current = microphone
+      marks.mark('mic')
       const credentials = await sessionRequest<RtcCredentials>(sessionId, 'agent', {}).catch(error => { agentFailed = true; throw error })
       agentRequested = true; hasAgent.current = true
+      marks.mark('agent')
       if (!isCurrent()) { await releaseMedia(); void sessionRequest(sessionId,'end',{}).catch(()=>{}); return }
       const client = AgoraRTC.createClient({ mode:'rtc', codec:'h264' })
       clientRef.current = client
@@ -86,6 +91,7 @@ export function useSuspectVoice(sessionId: string, onReady: () => Promise<void>)
           if (!isCurrent()) return
           ready = true; active.current = true; starting.current = false
           if(timeoutRef.current) { clearTimeout(timeoutRef.current); timeoutRef.current = null }
+          marks.mark('ready'); marks.report('ready')
           setPhase('live'); await readyCallback.current()
         } catch {
           if(isCurrent()) { setError('Media is connected, but the interview clock is not ready yet. Please retry the connection.'); setPhase('error') }
@@ -104,12 +110,12 @@ export function useSuspectVoice(sessionId: string, onReady: () => Promise<void>)
             // Prefer avatar-delayed audio if the avatar publishes it; never play both tracks.
             if(audioRef.current && Number(user.uid) !== credentials.avatarUid) return
             audioRef.current?.stop(); audioRef.current = user.audioTrack
-            user.audioTrack.on('first-frame-decoded', () => { audioDecoded = true; void markReady() })
+            user.audioTrack.on('first-frame-decoded', () => { marks.mark('first-audio'); audioDecoded = true; void markReady() })
             user.audioTrack.play()
           }
           if(mediaType === 'video' && user.videoTrack) {
             videoRef.current = user.videoTrack
-            user.videoTrack.on('first-frame-decoded', () => { videoDecoded = true; void markReady() })
+            user.videoTrack.on('first-frame-decoded', () => { marks.mark('first-video'); videoDecoded = true; void markReady() })
             if(videoElement.current) user.videoTrack.play(videoElement.current, { fit:'contain' })
           }
         } catch { if(isCurrent()) setError('A remote media track could not be opened. Check your connection and retry.') }
@@ -135,8 +141,10 @@ export function useSuspectVoice(sessionId: string, onReady: () => Promise<void>)
         },
       })
       await client.join(credentials.appId, credentials.channel, credentials.rtcToken, credentials.uid)
+      marks.mark('join')
       if(!isCurrent()) { await releaseMedia(); return }
       await client.publish(microphone)
+      marks.mark('publish')
       published = true; setPhase('waiting_media'); void markReady()
       // Decode is the readiness gate. The player gets an explicit retry if no media arrives.
       timeoutRef.current = setTimeout(() => {
@@ -146,6 +154,7 @@ export function useSuspectVoice(sessionId: string, onReady: () => Promise<void>)
       resumeRef.current = () => { audioRef.current?.play(); failedAutoplay = false; setAudioBlocked(false); void markReady() }
     } catch (error) {
       if(isCurrent()) {
+        marks.report('failed')
         starting.current = false; active.current = false; await releaseMedia(); setPhase('error')
         setError(agentFailed
           ? (error instanceof Error ? error.message : 'The suspect could not be reached. Your clock never started.')
