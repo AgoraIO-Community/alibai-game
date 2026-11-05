@@ -189,3 +189,14 @@ test('captions stay display only and outside the media readiness gate', async ()
   assert.match(session, /sessionRequest<SessionView>\(sessionId,'sync-facts',\{\}\)/);
   assert.match(route, /if\(action==='sync-facts'\)return syncProviderFacts\(user\.id,id\)/);
 });
+test('the suspect shows at decode, the server starts the clock, and a failed start leaves nothing playing', async () => {
+  const [hook, screen] = await Promise.all(['lib/agora/use-suspect-voice.ts', 'components/game/interview-screen.tsx'].map(path => readFile(path, 'utf8')));
+  assert.match(screen, /const live = \['live','starting_clock','reconnecting'\]/);
+  // The overlay lifts only past the decode gate, and 'live' follows only a server reply.
+  const gate = hook.indexOf('!published || !audioDecoded'), overlay = hook.indexOf("setPhase('starting_clock')"), request = hook.indexOf("'agent-ready'"), live = hook.indexOf("setPhase('live'); await");
+  assert.ok(gate > 0 && gate < overlay && overlay < request && request < live);
+  const failure = hook.slice(live, hook.indexOf('finally { readyInFlight'));
+  assert.match(failure, /setPhase\('error'\)/);
+  assert.match(failure, /await releaseMedia\(\)/);
+  assert.match(failure, /\+\+attempt\.current/);
+});

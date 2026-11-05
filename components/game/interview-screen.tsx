@@ -42,7 +42,7 @@ export function InterviewScreen({ view, error, busy, clock, left, voice, questio
 }) {
   const [panel, setPanel] = useState<'questions' | 'tape' | 'notebook'>('questions')
   const state = view?.session.state
-  const live = ['live','reconnecting'].includes(voice.phase)
+  const live = ['live','starting_clock','reconnecting'].includes(voice.phase)
   const closed = state === 'ended' || state === 'scored'
   const counting = state === 'active' && !closed
   const lowTime = counting && left <= 30
@@ -111,7 +111,7 @@ export function InterviewScreen({ view, error, busy, clock, left, voice, questio
         </div>
         <footer className="mt-3 flex shrink-0 flex-col gap-2 border-t border-gold/20 pt-2.5 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
           <div className="min-w-0 flex-1">
-            <p role="status" className="flex items-center gap-2 text-xs text-gold sm:text-sm"><StatusDot tone={line.tone} pulse={line.pulse} className="shrink-0" />{voice.phase === 'live' ? 'Connected · Your microphone is live' : voice.phase === 'reconnecting' ? 'Reconnecting · The interview clock continues' : view.session.state === 'ended' || view.session.state === 'scored' ? 'Interview closed' : 'Your clock starts after audio and video connect.'}</p>
+            <p role="status" className="flex items-center gap-2 text-xs text-gold sm:text-sm"><StatusDot tone={line.tone} pulse={line.pulse} className="shrink-0" />{voice.phase === 'live' ? 'Connected · Your microphone is live' : voice.phase === 'starting_clock' ? 'Suspect connected · Confirming the clock…' : voice.phase === 'reconnecting' ? 'Reconnecting · The interview clock continues' : view.session.state === 'ended' || view.session.state === 'scored' ? 'Interview closed' : 'Your clock starts after audio and video connect.'}</p>
             {voice.error && <p role="alert" className="mt-1 text-xs text-ivory sm:text-sm">{voice.error}</p>}
           </div>
           {/* On phones every action shares the row equally and labels shorten, so error states stay two rows at most. */}

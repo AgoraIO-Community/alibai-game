@@ -10,7 +10,7 @@ interface RtcCredentials {
   appId: string; channel: string; uid: number; rtcToken: string; rtmUid: string; rtmToken: string
   agentUid: number; avatarUid: number; expiresAt: number
 }
-type Phase = 'idle' | 'connecting' | 'waiting_media' | 'live' | 'reconnecting' | 'ended' | 'error'
+type Phase = 'idle' | 'connecting' | 'waiting_media' | 'starting_clock' | 'live' | 'reconnecting' | 'ended' | 'error'
 
 /** Media lifecycle adapted from the official Next.js ConversationComponent and RTC Web skill.
  * Live captions are display only. No transcript or fact leaves the browser: discovery remains
@@ -86,6 +86,8 @@ export function useSuspectVoice(sessionId: string, onReady: () => Promise<void>)
       const markReady = async () => {
         if (!isCurrent() || ready || readyInFlight || !published || !audioDecoded || !videoDecoded || failedAutoplay) return
         readyInFlight = true
+        // Media is playing, so the suspect shows now. Only the server's reply starts the clock.
+        setPhase('starting_clock')
         try {
           await sessionRequest(sessionId, 'agent-ready', {})
           if (!isCurrent()) return
@@ -94,7 +96,15 @@ export function useSuspectVoice(sessionId: string, onReady: () => Promise<void>)
           marks.mark('ready'); marks.report('ready')
           setPhase('live'); await readyCallback.current()
         } catch {
-          if(isCurrent()) { setError('Media is connected, but the interview clock is not ready yet. Please retry the connection.'); setPhase('error') }
+          if(isCurrent()) {
+            // Leave nothing playing behind the error. The agent stays up for a retry, and
+            // the refresh shows the true state if the server did start the clock.
+            marks.report('failed')
+            ++attempt.current; starting.current = false; active.current = false
+            setError('The suspect connected, but the server could not confirm the interview clock. Please retry the connection.'); setPhase('error')
+            await releaseMedia()
+            await readyCallback.current().catch(() => {})
+          }
         } finally { readyInFlight = false }
       }
       AgoraRTC.onAudioAutoplayFailed = () => { if(isCurrent()) { failedAutoplay = true; setAudioBlocked(true) } }
