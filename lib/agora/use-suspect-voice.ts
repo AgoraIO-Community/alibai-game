@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { IAgoraRTCClient, IMicrophoneAudioTrack, IRemoteAudioTrack, IRemoteVideoTrack } from 'agora-rtc-sdk-ng'
-import { sessionRequest } from '@/lib/game/api'
+import { sessionRequest, type SessionView } from '@/lib/game/api'
 import { connectLiveTranscript, type LiveTranscript, type TranscriptLine, type TranscriptStatus } from '@/lib/agora/live-transcript'
 import { startupMarks } from '@/lib/agora/startup-marks'
 
@@ -58,6 +58,13 @@ export function useSuspectVoice(sessionId: string, onReady: () => Promise<void>)
     await releaseMedia(); setPhase('ended')
   }, [releaseMedia])
 
+  // Only a confirmed end clears hasAgent, so a failed or retried connection keeps the unmount cleanup.
+  const endSession = useCallback(async () => {
+    const view = await sessionRequest<SessionView>(sessionId, 'end', {})
+    hasAgent.current = false
+    return view
+  }, [sessionId])
+
   const start = useCallback(async () => {
     if (starting.current || active.current) return
     starting.current = true
@@ -78,7 +85,7 @@ export function useSuspectVoice(sessionId: string, onReady: () => Promise<void>)
       const credentials = await sessionRequest<RtcCredentials>(sessionId, 'agent', {}).catch(error => { agentFailed = true; throw error })
       agentRequested = true; hasAgent.current = true
       marks.mark('agent')
-      if (!isCurrent()) { await releaseMedia(); void sessionRequest(sessionId,'end',{}).catch(()=>{}); return }
+      if (!isCurrent()) { await releaseMedia(); void endSession().catch(()=>{}); return }
       const client = AgoraRTC.createClient({ mode:'rtc', codec:'h264' })
       clientRef.current = client
       let audioDecoded = false, videoDecoded = false, published = false, ready = false, readyInFlight = false
@@ -158,7 +165,7 @@ export function useSuspectVoice(sessionId: string, onReady: () => Promise<void>)
       published = true; setPhase('waiting_media'); void markReady()
       // Decode is the readiness gate. The player gets an explicit retry if no media arrives.
       timeoutRef.current = setTimeout(() => {
-        if(isCurrent() && !ready) { setError('The suspect’s audio and avatar did not connect in time. Your clock never started. Please request another case.'); setPhase('error'); starting.current = false; ++attempt.current; void releaseMedia(); void sessionRequest(sessionId,'end',{}).then(() => readyCallback.current()).catch(()=>{}) }
+        if(isCurrent() && !ready) { setError('The suspect’s audio and avatar did not connect in time. Your clock never started. Please request another case.'); setPhase('error'); starting.current = false; ++attempt.current; void releaseMedia(); void endSession().then(() => readyCallback.current()).catch(()=>{}) }
       }, 60000)
       // Replay from a fresh user gesture can release browser autoplay restrictions.
       resumeRef.current = () => { audioRef.current?.play(); failedAutoplay = false; setAudioBlocked(false); void markReady() }
@@ -169,12 +176,12 @@ export function useSuspectVoice(sessionId: string, onReady: () => Promise<void>)
         setError(agentFailed
           ? (error instanceof Error ? error.message : 'The suspect could not be reached. Your clock never started.')
           : 'Could not connect the interview. Allow microphone access, check your connection, and retry. Your case is saved.')
-        if(agentRequested) await sessionRequest(sessionId,'end',{}).catch(()=>{})
+        if(agentRequested) await endSession().catch(()=>{})
         // A failed start abandons the session on the server; show the player the way out.
         if(agentRequested || agentFailed) await readyCallback.current().catch(()=>{})
       }
     }
-  }, [sessionId, releaseMedia])
+  }, [sessionId, releaseMedia, endSession])
 
   const resumeRef = useRef<() => void>(() => {})
   const resumeAudio = useCallback(() => resumeRef.current(), [])
@@ -193,5 +200,5 @@ export function useSuspectVoice(sessionId: string, onReady: () => Promise<void>)
     if(hasAgent.current) void fetch(`/api/sessions/${encodeURIComponent(sessionId)}/end`, { method:'POST', credentials:'same-origin', headers:{'Content-Type':'application/json'},body:'{}',keepalive:true }).catch(()=>{})
   }, [sessionId,releaseMedia])
 
-  return { phase,error,muted,audioBlocked,transcript,transcriptStatus,videoElement,start,disconnect,toggleMute,resumeAudio }
+  return { phase,error,muted,audioBlocked,transcript,transcriptStatus,videoElement,start,disconnect,endSession,toggleMute,resumeAudio }
 }

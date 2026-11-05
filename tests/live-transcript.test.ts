@@ -200,3 +200,14 @@ test('the suspect shows at decode, the server starts the clock, and a failed sta
   assert.match(failure, /await releaseMedia\(\)/);
   assert.match(failure, /\+\+attempt\.current/);
 });
+test('only a confirmed end stops the unmount cleanup from sending another', async () => {
+  const [hook, session] = await Promise.all(['lib/agora/use-suspect-voice.ts', 'components/game/production-session.tsx'].map(path => readFile(path, 'utf8')));
+  assert.equal(hook.match(/hasAgent\.current = false/g)?.length, 1);
+  assert.match(hook, /const view = await sessionRequest<SessionView>\(sessionId, 'end', \{\}\)\n\s+hasAgent\.current = false/);
+  assert.match(hook, /if\(hasAgent\.current\) void fetch\(/);
+  assert.equal(hook.match(/sessionRequest(?:<\w+>)?\(sessionId,\s*'end'/g)?.length, 1);
+  const disconnect = hook.slice(hook.indexOf('const disconnect ='), hook.indexOf('}, [releaseMedia])'));
+  assert.doesNotMatch(disconnect, /hasAgent/);
+  assert.match(session, /if\(actionName === 'end'\) applyView\(await voice\.endSession\(\)\)/);
+  assert.doesNotMatch(session, /sessionRequest(?:<\w+>)?\(sessionId,\s*'end'/);
+});

@@ -97,7 +97,12 @@ export function ProductionSession({ sessionId, mode }: { sessionId: string; mode
 
   async function action(actionName: string, body: unknown = {}) {
     setBusy(true); setError('')
-    try { await sessionRequest(sessionId, actionName, body); await refresh(); return true }
+    try {
+      // The end response is a full view. A verdict response is not, so that one re-reads.
+      if(actionName === 'end') applyView(await voice.endSession())
+      else { await sessionRequest(sessionId, actionName, body); await refresh() }
+      return true
+    }
     catch (e) { setError(e instanceof Error ? e.message : 'Request failed.'); return false }
     finally { setBusy(false) }
   }
@@ -116,8 +121,8 @@ export function ProductionSession({ sessionId, mode }: { sessionId: string; mode
   useEffect(() => {
     if(mode !== 'interview' || view?.session.state !== 'active' || left > 0) return
     void voice.disconnect()
-    void sessionRequest(sessionId,'end',{}).then(() => refresh()).catch(() => setError('The interview has ended. Please retry filing your verdict.'))
-  }, [mode, view?.session.state, left, sessionId, refresh, voice.disconnect])
+    void voice.endSession().then(data => { applyView(data); setError('') }).catch(() => setError('The interview has ended. Please retry filing your verdict.'))
+  }, [mode, view?.session.state, left, applyView, voice.disconnect, voice.endSession])
   // Entering the room connects straight away. Failures fall back to the retry button.
   useEffect(() => {
     const state = view?.session.state
