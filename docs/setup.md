@@ -67,7 +67,7 @@ All session operations require the logged-in account. Auth is maintained in Http
 | `POST /api/sessions/:id/sync-facts` | Fetch trusted provider history on the server and verify canonical disclosures; accepts no client transcript or fact IDs. |
 | `POST /api/sessions/:id/verdict` | `{ verdict: "guilty" | "innocent", evidenceIds: string[], reasoning?: string }`. One immutable verdict; identical retries are safe. |
 | `GET /api/realtime-auth` | Authenticated user's short-lived token plus public Supabase URL/key for owner-filtered Realtime subscriptions. |
-| `GET /api/leaderboard` | Per-user `{ playerId, detectiveName, total, bestScore, gamesPlayed }`; no case secrets or transcripts. |
+| `GET /api/leaderboard` | Per-user `{ playerId, detectiveName, total, bestScore, gamesPlayed }`; no case secrets or transcripts. Cached at the CDN (`s-maxage=10, stale-while-revalidate=30`), so a new score can take up to about 40 seconds to appear. |
 
 Example join:
 
