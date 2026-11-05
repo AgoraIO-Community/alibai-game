@@ -62,6 +62,18 @@ test('public DTOs contain no truth, answer keys, unlock conditions or undiscover
  assert.equal(dto.publicEvidence.some(e => (e.category as string) === 'red_herring'), false);
  assert.equal(dto.publicEvidence.find(e => e.id === clone().redHerrings[0].id)?.category, 'testimony');
 });
+test('every briefing lists only the public suspect fields and leaves out private actor direction', () => {
+ const casting = { avatarId: 'avatar-test', voiceId: 'voice-test' };
+ for (const s of fixtures) {
+  const { publicSuspect } = briefing(s, 'session-test', casting);
+  assert.deepEqual(Object.keys(publicSuspect).sort(), ['id','name','role','relationship','avatarDescription','avatarId','voiceId'].sort(), s.title);
+  assert.equal(publicSuspect.avatarId, casting.avatarId, s.title);
+  for (const dto of [briefing(s, 'session-test'), briefing(s, 'session-test', casting)]) {
+   const serialized = JSON.stringify(dto);
+   for (const forbidden of ['speechStyle','attitude',s.suspect.speechStyle,s.suspect.attitude]) assert.equal(serialized.includes(forbidden), false, `${s.title}: ${forbidden}`);
+  }
+ }
+});
 test('evidence IDs cannot reveal private classifications', () => {
  const s = clone(); s.redHerrings[0].id = 'red-herring-1'; s.answerKey.misleading[0].evidenceId = 'red-herring-1';
  assert.ok(validateChanged(s).errors.includes('evidence ID leaks private classification'));
