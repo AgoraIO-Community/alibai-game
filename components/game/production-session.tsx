@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/button'
 import { gameRequest, sessionRequest, type PublicEvidence, type PublicQuestion, type SessionView } from '@/lib/game/api'
 import { DecoRule, Eyebrow } from './deco'
 import { useSuspectVoice } from '@/lib/agora/use-suspect-voice'
+import type { TranscriptLine, TranscriptStatus } from '@/lib/agora/live-transcript'
 
 const buttonClass = 'min-h-12 rounded-none bg-gold px-6 font-mono text-xs uppercase tracking-widest text-obsidian hover:bg-ivory'
 
@@ -18,6 +19,20 @@ function EvidenceList({ items }: { items: PublicEvidence[] }) {
     <p className="mt-2 text-sm leading-relaxed text-ivory/75">{item.description}</p>
     <p className="mt-3 text-xs text-ivory/45">Source: {item.source}</p>
   </li>)}</ul>
+}
+
+// Display only. Evidence in the notebook comes from the server, never from these lines.
+function NotebookTranscript({ lines, status, suspectName }: { lines: TranscriptLine[]; status: TranscriptStatus; suspectName: string }) {
+  const log = useRef<HTMLDivElement | null>(null)
+  useEffect(() => { if(log.current) log.current.scrollTop = log.current.scrollHeight }, [lines])
+  const note = status === 'unavailable' ? 'The live transcript is unavailable. Your voice interview is not affected.'
+    : lines.length > 0 ? '' : status === 'live' ? 'Listening for the first words…' : 'The transcript appears here while the line is open.'
+  return <div className="mt-4 border border-gold/25 bg-charcoal/30 p-4">
+    <h3 className="label-mono text-gold/70">Live transcript</h3>
+    <p className="mt-2 text-xs text-ivory/55">For reference only. Evidence appears below once verified.</p>
+    {lines.length > 0 && <div ref={log} role="log" aria-label="Interview transcript" tabIndex={0} className="mt-3 flex max-h-72 flex-col gap-3 overflow-y-auto pr-2">{lines.map(line => <p key={line.id} className="text-sm leading-relaxed"><span className={`mr-2 font-mono text-xs uppercase tracking-widest ${line.speaker === 'suspect' ? 'text-gold' : 'text-ivory/55'}`}>{line.speaker === 'suspect' ? suspectName : 'You'}</span><span className="text-ivory/85">{line.text}</span></p>)}</div>}
+    {note && <p role="status" className="mt-3 text-sm text-ivory/60">{note}</p>}
+  </div>
 }
 
 export function ProductionSession({ sessionId, mode }: { sessionId: string; mode: 'briefing' | 'interview' | 'verdict' | 'results' }) {
@@ -164,7 +179,7 @@ export function ProductionSession({ sessionId, mode }: { sessionId: string; mode
             <div className="mt-4 flex flex-col gap-3">{questions.map(q => <button key={q.id} type="button" aria-pressed={selectedQuestion === q.id} onClick={() => setSelectedQuestion(q.id)} className={`min-h-14 border p-4 text-left text-sm ${selectedQuestion === q.id ? 'border-gold bg-gold/15' : 'border-ivory/20 bg-charcoal/30'}`}>{q.text}</button>)}</div>
             <button type="button" className="mt-4 min-h-11 text-sm text-gold underline" onClick={() => void nextQuestions()}>{more === null ? 'Starting questions' : 'More questions'}</button>
           </section>
-          <section className="mt-8"><div className="flex items-center justify-between"><h2 className="font-display text-2xl">Detective’s Notebook</h2><button type="button" className="min-h-11 text-sm text-gold underline" onClick={() => void refresh()}>Refresh notebook</button></div><EvidenceList items={view.notebook} /></section>
+          <section className="mt-8"><div className="flex items-center justify-between"><h2 className="font-display text-2xl">Detective’s Notebook</h2><button type="button" className="min-h-11 text-sm text-gold underline" onClick={() => void refresh()}>Refresh notebook</button></div><NotebookTranscript lines={voice.transcript} status={voice.transcriptStatus} suspectName={view.briefing.publicSuspect.name} /><EvidenceList items={view.notebook} /></section>
           <Button className={`${buttonClass} mt-8`} disabled={busy || !['active','ended','scored'].includes(view.session.state)} onClick={async () => { if(view.session.state === 'scored') router.push(`/game/${sessionId}/results`); else if(view.session.state === 'ended' || await action('end')) { await voice.disconnect(); router.push(`/game/${sessionId}/verdict`) } }}>End interview and file verdict</Button>
         </>}
         {mode === 'verdict' && <>
