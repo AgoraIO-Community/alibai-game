@@ -10,6 +10,7 @@ import { briefing, notebook, score, suggestions } from '../lib/scenarios/engine'
 import { generateScenario, HumanReviewRequired, StructuredJsonProvider, type JsonProvider } from '../lib/scenarios/generator';
 import type { Scenario } from '../lib/scenarios/schema';
 import { stepTimer } from '../lib/server/timing';
+import { formatClock, secondsLeft, startCountdown } from '../lib/game/clock';
 const clone = (index = 0) => structuredClone(fixtures[index]);
 const validateChanged = (s: Scenario) => { s.fingerprint = fingerprint(s); return validateScenario(s); };
 test('eight diverse handcrafted mysteries satisfy the same production validator', () => {
@@ -205,4 +206,48 @@ test('startup timing logs step durations only, including when a step fails', asy
  const logged = JSON.parse(lines[0].replace('[timing] agent ', ''));
  assert.deepEqual(Object.keys(logged), ['load', 'claim', 'total', 'ok']); assert.equal(logged.ok, false);
  for (const key of ['load', 'claim', 'total']) assert.equal(typeof logged[key], 'number');
+});
+const startedAt = Date.UTC(2026, 10, 5, 12);
+// A single large mock tick runs only one link of a timer chain, so advance as real time would.
+const advance = (timers: { tick(ms: number): void }, ms: number) => { for (let i = 0; i < ms; i += 100) timers.tick(Math.min(100, ms - i)); };
+test('the display clock applies the server correction and stops at the end time', () => {
+ const timing = { startedAt, endedAt: null, clockOffset: 0 };
+ assert.equal(secondsLeft({ ...timing, startedAt: null }, startedAt), 180);
+ assert.equal(secondsLeft(timing, startedAt), 180); assert.equal(secondsLeft(timing, startedAt - 500), 180);
+ assert.equal(secondsLeft(timing, startedAt + 179_001), 1); assert.equal(secondsLeft(timing, startedAt + 180_000), 0);
+ assert.equal(secondsLeft({ ...timing, clockOffset: 5000 }, startedAt), 175);
+ assert.equal(secondsLeft({ ...timing, endedAt: startedAt + 60_000 }, startedAt + 170_000), 120);
+ assert.equal(formatClock(125), '02:05');
+});
+test('the countdown ticks once a second and expiry fires once, on time', t => {
+ t.mock.timers.enable({ apis: ['setTimeout', 'Date'], now: startedAt });
+ let ticks = 0, expired = 0;
+ startCountdown({ startedAt, clockOffset: 0, onTick: () => ticks++, onExpire: () => expired++ });
+ advance(t.mock.timers, 10_000); assert.equal(ticks, 11); assert.equal(expired, 0);
+ advance(t.mock.timers, 169_999); assert.equal(expired, 0);
+ t.mock.timers.tick(1); assert.equal(expired, 1);
+ advance(t.mock.timers, 60_000); assert.equal(expired, 1);
+});
+test('the countdown expires by server time, at once if already over, and not after cancelling', t => {
+ t.mock.timers.enable({ apis: ['setTimeout', 'Date'], now: startedAt });
+ let expired = 0;
+ startCountdown({ startedAt, clockOffset: 175_000, onExpire: () => expired++ });
+ advance(t.mock.timers, 4999); assert.equal(expired, 0); t.mock.timers.tick(1); assert.equal(expired, 1);
+ startCountdown({ startedAt: startedAt - 200_000, clockOffset: 0, onExpire: () => expired++ }); assert.equal(expired, 2);
+ const cancel = startCountdown({ startedAt: Date.now(), clockOffset: 0, onExpire: () => expired++ });
+ cancel(); advance(t.mock.timers, 200_000); assert.equal(expired, 2);
+});
+test('a device that sleeps past the deadline expires at its next step', t => {
+ t.mock.timers.enable({ apis: ['setTimeout', 'Date'], now: startedAt });
+ let expired = 0;
+ startCountdown({ startedAt, clockOffset: 0, onExpire: () => expired++ });
+ t.mock.timers.setTime(startedAt + 500_000); t.mock.timers.tick(1000); assert.equal(expired, 1);
+});
+test('the session wires expiry to ending the interview, and only the clock ticks', async () => {
+ const session = await readFile('components/game/production-session.tsx', 'utf8');
+ assert.match(await readFile('components/game/tape-recorder.tsx', 'utf8'), /const left = useSecondsLeft\(timing\)/);
+ assert.doesNotMatch(session, /setInterval\(\(\) => setNow|setNow/);
+ const expiry = session.slice(session.indexOf('onExpire:'), session.indexOf('voice.endSession])', session.indexOf('onExpire:')));
+ assert.match(expiry, /voice\.disconnect\(\)/); assert.match(expiry, /voice\.endSession\(\)\.then\(data => \{ applyView\(data\)/);
+ assert.match(session, /view\?\.session\.state !== 'active' \|\| started === null\) return\n\s+return startCountdown/);
 });

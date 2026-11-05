@@ -8,7 +8,9 @@ import { Button } from '@/components/ui/button'
 import { gameRequest, sessionRequest, type PublicEvidence, type PublicQuestion, type SessionView } from '@/lib/game/api'
 import { DecoRule, Eyebrow } from './deco'
 import { InterviewScreen } from './interview-screen'
+import { SessionClock } from './session-clock'
 import { useSuspectVoice } from '@/lib/agora/use-suspect-voice'
+import { secondsLeft, startCountdown } from '@/lib/game/clock'
 
 const buttonClass = 'min-h-12 rounded-none bg-gold px-6 font-mono text-xs uppercase tracking-widest text-obsidian hover:bg-ivory'
 
@@ -32,10 +34,10 @@ export function ProductionSession({ sessionId, mode }: { sessionId: string; mode
   const [decision, setDecision] = useState<'guilty' | 'innocent' | null>(null)
   const [evidenceIds, setEvidenceIds] = useState<string[]>([])
   const [reasoning, setReasoning] = useState('')
-  const [now, setNow] = useState(0)
   const [clockOffset, setClockOffset] = useState(0)
   const syncingFacts = useRef(false)
   const autoConnected = useRef(false)
+  const autoEnded = useRef(false)
   const questionOffset = useRef(0)
   const applyView = useCallback((data: SessionView) => {
     setView(data)
@@ -90,10 +92,6 @@ export function ProductionSession({ sessionId, mode }: { sessionId: string; mode
     window.addEventListener('focus', onFocus)
     return () => window.removeEventListener('focus', onFocus)
   }, [refresh])
-  useEffect(() => {
-    const timer = window.setInterval(() => setNow(Date.now()), 250)
-    return () => window.clearInterval(timer)
-  }, [])
 
   async function action(actionName: string, body: unknown = {}) {
     setBusy(true); setError('')
@@ -116,24 +114,27 @@ export function ProductionSession({ sessionId, mode }: { sessionId: string; mode
   }
   const started = view?.session.started_at ? Date.parse(view.session.started_at) : null
   const ended = view?.session.ended_at ? Date.parse(view.session.ended_at) : null
-  const left = started === null ? 180 : Math.max(0, Math.ceil(180 - ((ended ?? ((now || started - clockOffset) + clockOffset)) - started) / 1000))
-  const clock = `${String(Math.floor(left / 60)).padStart(2, '0')}:${String(left % 60).padStart(2, '0')}`
+  const timing = { startedAt: started, endedAt: ended, clockOffset }
   useEffect(() => {
-    if(mode !== 'interview' || view?.session.state !== 'active' || left > 0) return
-    void voice.disconnect()
-    void voice.endSession().then(data => { applyView(data); setError('') }).catch(() => setError('The interview has ended. Please retry filing your verdict.'))
-  }, [mode, view?.session.state, left, applyView, voice.disconnect, voice.endSession])
+    if(mode !== 'interview' || view?.session.state !== 'active' || started === null) return
+    return startCountdown({ startedAt: started, clockOffset, onExpire: () => {
+      if(autoEnded.current) return
+      autoEnded.current = true
+      void voice.disconnect()
+      void voice.endSession().then(data => { applyView(data); setError('') }).catch(() => { autoEnded.current = false; setError('The interview has ended. Please retry filing your verdict.') })
+    } })
+  }, [mode, view?.session.state, started, clockOffset, applyView, voice.disconnect, voice.endSession])
   // Entering the room connects straight away. Failures fall back to the retry button.
   useEffect(() => {
     const state = view?.session.state
-    if(mode !== 'interview' || autoConnected.current || voice.phase !== 'idle' || left <= 0) return
+    if(mode !== 'interview' || autoConnected.current || voice.phase !== 'idle' || secondsLeft({ startedAt: started, endedAt: ended, clockOffset }, Date.now()) <= 0) return
     if(!state || !['created','preparing','active'].includes(state)) return
     autoConnected.current = true
     void voice.start()
-  }, [mode, view?.session.state, voice.phase, voice.start, left])
+  }, [mode, view?.session.state, voice.phase, voice.start, started, ended, clockOffset])
 
   // The room has its own one-viewport layout; the handlers stay here so the dossier pages share them.
-  if (mode === 'interview') return <InterviewScreen view={view} error={error} busy={busy} clock={clock} left={left} voice={voice}
+  if (mode === 'interview') return <InterviewScreen view={view} error={error} busy={busy} timing={timing} voice={voice}
     questions={questions} more={more} selectedQuestion={selectedQuestion} onSelectQuestion={setSelectedQuestion} onNextQuestions={() => void nextQuestions()} onRefresh={() => void refresh()}
     onCancelConnection={async()=>{await voice.disconnect();await action('end')}}
     onRetryConnection={async () => { await voice.disconnect(); await voice.start() }}
@@ -141,7 +142,7 @@ export function ProductionSession({ sessionId, mode }: { sessionId: string; mode
 
   return <main className="min-h-dvh bg-obsidian spotlight px-5 pb-16 pt-6 text-ivory">
     <div className="mx-auto max-w-3xl">
-      <header className="flex items-center justify-between gap-4"><Link href="/rules" className="label-mono text-gold">Rules / New case</Link><span className="font-mono text-sm text-gold">{clock}</span></header>
+      <header className="flex items-center justify-between gap-4"><Link href="/rules" className="label-mono text-gold">Rules / New case</Link><SessionClock timing={timing} className="font-mono text-sm text-gold" /></header>
       {error && <div role="alert" className="mt-6 border border-oxblood bg-oxblood/20 p-4 text-sm">{error}<button type="button" onClick={() => void refresh()} className="ml-3 underline">Retry</button></div>}
       {!view ? <p className="mt-12 label-mono">Opening case file…</p> : <>
         <Eyebrow className="mt-10">{mode === 'results' ? 'Case resolution' : mode === 'verdict' ? 'Detective’s report' : 'Case file'}</Eyebrow>
