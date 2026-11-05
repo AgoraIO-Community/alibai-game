@@ -1,7 +1,7 @@
 import type { AgentTranscription, AgoraVoiceAI, AgoraVoiceAIEvents, RTCEngine, TranscriptHelperItem, TranscriptHelperMode, UserTranscription } from 'agora-agent-client-toolkit'
 import type { RTMClient, RTMConfig } from 'agora-rtm'
 
-// Live captions for the Detective's Notebook, adapted from the official Next.js
+// Live captions for the tape recorder in the interrogation room, adapted from the official Next.js
 // quickstart (LandingPage.tsx RTM setup, ConversationComponent.tsx toolkit lifecycle).
 // Display only: nothing here may reach the server. Fact discovery stays with the
 // trusted provider-history sync, so this module deliberately has no API client.

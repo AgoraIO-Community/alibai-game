@@ -9,8 +9,8 @@ import type { useSuspectVoice } from '@/lib/agora/use-suspect-voice'
 import { cn } from '@/lib/utils'
 import { Eyebrow, StatusDot } from './deco'
 import { DetectiveNotebook } from './detective-notebook'
-import { NotebookTranscript } from './notebook-transcript'
 import { SuggestedQuestions } from './suggested-questions'
+import { TapeRecorder } from './tape-recorder'
 
 export type SuspectVoice = ReturnType<typeof useSuspectVoice>
 
@@ -18,9 +18,10 @@ const goldButton = 'min-h-12 rounded-none bg-gold px-5 font-mono text-xs upperca
 const quietButton = 'min-h-12 rounded-none border border-gold/50 bg-transparent px-4 font-mono text-xs uppercase tracking-widest text-gold hover:bg-gold/10 hover:text-ivory'
 
 /**
- * The interrogation room: suspect stage in the centre, questions and notebook alongside on wide
- * screens, tabs beneath a fixed-height stage on phones. Everything fits one viewport; the panels
- * scroll inside themselves. Handlers and conditions belong to ProductionSession; this only lays them out.
+ * The interrogation room: suspect stage in the centre, questions to the left, the tape recorder
+ * (live transcript) over the notebook to the right on wide screens, tabs beneath a fixed-height
+ * stage on phones. Everything fits one viewport; the panels scroll inside themselves. Handlers and
+ * conditions belong to ProductionSession; this only lays them out.
  */
 export function InterviewScreen({ view, error, busy, clock, left, voice, questions, more, selectedQuestion, onSelectQuestion, onNextQuestions, onRefresh, onCancelConnection, onRetryConnection, onEndInterview }: {
   view: SessionView | null
@@ -39,7 +40,7 @@ export function InterviewScreen({ view, error, busy, clock, left, voice, questio
   onRetryConnection: () => Promise<void>
   onEndInterview: () => Promise<void>
 }) {
-  const [panel, setPanel] = useState<'questions' | 'notebook'>('questions')
+  const [panel, setPanel] = useState<'questions' | 'tape' | 'notebook'>('questions')
   const state = view?.session.state
   const live = ['live','reconnecting'].includes(voice.phase)
   const closed = state === 'ended' || state === 'scored'
@@ -71,7 +72,9 @@ export function InterviewScreen({ view, error, busy, clock, left, voice, questio
         <div className="mt-3 flex flex-1 flex-col gap-3 lg:grid lg:min-h-0 lg:grid-cols-[minmax(228px,3fr)_minmax(0,7fr)_minmax(248px,4fr)] lg:grid-rows-[minmax(0,1fr)] lg:gap-4">
           {/* Phones: a 4:3 stage capped at 40dvh leaves room for three questions beneath. Wide screens: the grid row sets the height. */}
           <section aria-label="Suspect interview" className="relative aspect-[4/3] max-h-[40dvh] w-full shrink-0 overflow-hidden border border-gold/40 bg-obsidian shadow-[0_0_80px_rgba(0,0,0,0.6)] lg:order-2 lg:aspect-auto lg:max-h-none lg:min-h-0">
-            <div ref={voice.videoElement} className="absolute inset-0" />
+            {/* The SDK inserts its own video element here, so the film and vignette sit on the container and an overlay. */}
+            <div ref={voice.videoElement} className="stage-film absolute inset-0" />
+            <div className="stage-vignette pointer-events-none absolute inset-0" aria-hidden />
             <div className="pointer-events-none absolute inset-x-0 bottom-0 h-1/3 bg-gradient-to-t from-obsidian/90 to-transparent" aria-hidden />
             <span className="pointer-events-none absolute inset-1.5 border border-gold/20" aria-hidden />
             <span className="pointer-events-none absolute left-3 top-3 size-4 border-l border-t border-gold/70" aria-hidden />
@@ -91,15 +94,20 @@ export function InterviewScreen({ view, error, busy, clock, left, voice, questio
               <p className="mt-4 max-w-md text-sm text-ivory/60">{voice.phase === 'connecting' ? 'Opening a secure line…' : voice.phase === 'waiting_media' ? 'Waiting for the suspect’s audio and avatar…' : ['error','ended'].includes(voice.phase) ? 'The line is down.' : 'Opening a secure line…'}</p>
             </div>}
           </section>
-          <div role="tablist" aria-label="Interview panels" className="grid shrink-0 grid-cols-2 border border-gold/25 bg-charcoal/40 lg:hidden">
-            {([['questions','Questions'],['notebook',`Notebook · ${view.notebook.length}`]] as const).map(([key,label]) => <button key={key} type="button" role="tab" id={`tab-${key}`} aria-selected={panel === key} aria-controls={`interview-${key}`} onClick={() => setPanel(key)} className={cn('label-mono min-h-11 transition-colors duration-150 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ivory', panel === key ? 'bg-gold text-obsidian' : 'text-ivory/70 hover:text-gold')}>{panel === key ? '◆ ' : ''}{label}</button>)}
+          {/* Three labels share 288px at 320 wide: columns follow label length ("Notebook · 12" needs about 120px in
+              label-mono) and the selected-tab diamond only appears from sm up. */}
+          <div role="tablist" aria-label="Interview panels" className="grid shrink-0 grid-cols-[5fr_3fr_6fr] border border-gold/25 bg-charcoal/40 lg:hidden">
+            {([['questions','Questions'],['tape','Tape'],['notebook',`Notebook · ${view.notebook.length}`]] as const).map(([key,label]) => <button key={key} type="button" role="tab" id={`tab-${key}`} aria-selected={panel === key} aria-controls={`interview-${key}`} onClick={() => setPanel(key)} className={cn('label-mono min-h-11 truncate px-1 transition-colors duration-150 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ivory', panel === key ? 'bg-gold text-obsidian' : 'text-ivory/70 hover:text-gold')}>{panel === key && <span className="hidden sm:inline" aria-hidden>◆ </span>}{label}</button>)}
           </div>
           {/* Below lg the panel contributes only its 13rem floor to the column's minimum height (contain-size), so a
               short viewport such as a landscape phone scrolls the room instead of crushing the panel, while a tall one never stretches. */}
           <SuggestedQuestions id="interview-questions" questions={questions} more={more} selectedQuestion={selectedQuestion} onSelect={onSelectQuestion} onNext={onNextQuestions} className={cn('min-h-52 flex-1 contain-size lg:order-1 lg:min-h-0 lg:contain-none', panel === 'questions' ? 'flex' : 'hidden lg:flex')} />
-          <DetectiveNotebook id="interview-notebook" items={view.notebook} onRefresh={onRefresh} className={cn('min-h-52 flex-1 contain-size lg:order-3 lg:min-h-0 lg:contain-none', panel === 'notebook' ? 'flex' : 'hidden lg:flex')}>
-            <NotebookTranscript lines={voice.transcript} status={voice.transcriptStatus} suspectName={view.briefing.publicSuspect.name} />
-          </DetectiveNotebook>
+          {/* Right column. On phones the wrapper contributes nothing (contents) and each panel is its own tab; on lg the
+              deck takes a fixed share of the column so the transcript stays near the top and the notebook fills the rest. */}
+          <div className="contents lg:order-3 lg:flex lg:min-h-0 lg:flex-col lg:gap-3">
+            <TapeRecorder id="interview-tape" lines={voice.transcript} status={voice.transcriptStatus} suspectName={view.briefing.publicSuspect.name} running={voice.phase === 'live'} closed={closed} left={left} className={cn('min-h-64 flex-1 contain-size lg:h-[clamp(17rem,46dvh,25rem)] lg:min-h-0 lg:flex-none lg:contain-none', panel === 'tape' ? 'flex' : 'hidden lg:flex')} />
+            <DetectiveNotebook id="interview-notebook" items={view.notebook} onRefresh={onRefresh} className={cn('min-h-52 flex-1 contain-size lg:min-h-0 lg:contain-none', panel === 'notebook' ? 'flex' : 'hidden lg:flex')} />
+          </div>
         </div>
         <footer className="mt-3 flex shrink-0 flex-col gap-2 border-t border-gold/20 pt-2.5 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
           <div className="min-w-0 flex-1">

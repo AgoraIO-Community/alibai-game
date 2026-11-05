@@ -4,12 +4,11 @@ import type { PublicEvidence } from '@/lib/game/api'
 import { cn } from '@/lib/utils'
 
 /** Side panel on desktop, tab on phones. Scrolls inside itself so a long notebook never stretches the room. */
-export function DetectiveNotebook({ items, onRefresh, id, className, children }: {
+export function DetectiveNotebook({ items, onRefresh, id, className }: {
   items: PublicEvidence[]
   onRefresh: () => void
   id?: string
   className?: string
-  children?: React.ReactNode
 }) {
   return <section id={id} aria-labelledby="notebook-heading" className={cn('flex-col border border-gold/25 bg-charcoal/30', className)}>
     <header className="flex shrink-0 items-center justify-between gap-3 border-b border-gold/20 px-4 py-2">
@@ -31,7 +30,6 @@ export function DetectiveNotebook({ items, onRefresh, id, className, children }:
           <p className="mt-1.5 text-sm leading-relaxed text-ivory/75">{item.description}</p>
           <p className="mt-2 text-xs text-ivory/45">Source: {item.source}</p>
         </li>)}</ol>}
-      {children}
     </div>
   </section>
 }
