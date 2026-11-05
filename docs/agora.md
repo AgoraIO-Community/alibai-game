@@ -81,7 +81,7 @@ Use one neutral line for every audition, such as “I was working that evening. 
 6. Wait for verified media readiness before starting the three-minute game clock. An accepted start call is not proof the player has heard audio.
 7. Call `stopSuspectAgent()` using the persisted agent ID at the deadline/end; retain retryable cleanup state if the provider fails.
 
-The browser joins RTC with numeric `uid`, subscribes to the agent's audio and avatar's video, and logs into RTM using `rtmUid` (the same numeric identity as a string). RTC uses `rtcToken`; RTM uses `rtmToken`. The app certificate, avatar token, private case prompt, and provider keys never belong in the browser response.
+The browser joins RTC with numeric `uid`, subscribes to the agent's audio and avatar's video, and logs into RTM using `rtmUid`, a per-session string derived from the session ID because RTM allows one login per user ID across the project (the agent needs only the RTC `uid` in `remote_rtc_uids`). RTC uses `rtcToken`; RTM uses `rtmToken`. The app certificate, avatar token, private case prompt, and provider keys never belong in the browser response.
 
 The managed model receives only the immutable instructions for this session. A future trusted transcript ingestion adapter must authenticate provider events, match the stored agent ID/session, and pass only actually delivered suspect speech to `recordFactRevealed()`. Browser captions, question clicks, and user-supplied fact IDs are not evidence. The server validates disclosures against the contract; an agent's statement cannot award arbitrary points. That transcript ingestion bridge is a separate integration boundary, not an unauthenticated browser endpoint.
 

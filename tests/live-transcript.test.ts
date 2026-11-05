@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
+import { inflateSync } from 'node:zlib';
 import { connectLiveTranscript, normalizeTranscriptSpacing, toTranscriptLines, type TranscriptLine, type TranscriptSdks, type TranscriptStatus } from '../lib/agora/live-transcript';
 
 type Item = Parameters<typeof toTranscriptLines>[0][number];
@@ -154,6 +155,28 @@ test('the real toolkit turns RTM transcription messages into lines, then lets go
   assert.equal(rtmListeners.get('message')?.size, 0);
   assert.equal(rtcListeners.size, 0);
   assert.equal(toolkit.AgoraVoiceAI.getState(), null);
+});
+test('each session gets its own RTM identity, and renewal keeps it', async () => {
+  // Fixed-format dummies for token signing only; these are not credentials.
+  process.env.NEXT_PUBLIC_AGORA_APP_ID = 'a'.repeat(32);
+  process.env.NEXT_AGORA_APP_CERTIFICATE = 'b'.repeat(32);
+  const { createPlayerRtcCredentials } = await import('../lib/agora/server-agent');
+  const rtmSubject = (token: string) => inflateSync(Buffer.from(token.slice(3), 'base64')).toString('latin1');
+  const sessionA = '11111111-1111-4111-8111-111111111111', sessionB = '22222222-2222-4222-8222-222222222222';
+  const first = createPlayerRtcCredentials(sessionA), other = createPlayerRtcCredentials(sessionB);
+  assert.notEqual(first.rtmUid, other.rtmUid);
+  assert.ok(Buffer.byteLength(first.rtmUid) <= 64, 'RTM user IDs are limited to 64 bytes');
+  assert.match(first.rtmUid, /^[A-Za-z0-9-]+$/);
+  // The token subject must equal the login ID, or RTM login fails.
+  assert.ok(rtmSubject(first.rtmToken).includes(first.rtmUid));
+  assert.equal(rtmSubject(first.rtmToken).includes(other.rtmUid), false);
+  // Token renewal re-requests credentials and applies them to the live RTM client.
+  const renewed = createPlayerRtcCredentials(sessionA);
+  assert.equal(renewed.rtmUid, first.rtmUid);
+  assert.ok(rtmSubject(renewed.rtmToken).includes(first.rtmUid));
+  // The RTC identities the agent subscribes to stay fixed.
+  assert.deepEqual([first.uid, other.uid, first.agentUid, first.avatarUid], [1001, 1001, 123456, 1002]);
+  assert.throws(() => createPlayerRtcCredentials('not-a-session'));
 });
 test('captions stay display only and outside the media readiness gate', async () => {
   const [helper, hook, session, route] = await Promise.all(['lib/agora/live-transcript.ts', 'lib/agora/use-suspect-voice.ts', 'components/game/production-session.tsx', 'app/api/sessions/[id]/[action]/route.ts'].map(path => readFile(path, 'utf8')));
