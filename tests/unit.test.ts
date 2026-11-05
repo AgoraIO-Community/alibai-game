@@ -5,17 +5,19 @@ import { AVATAR_VOICES } from '../lib/game/avatar-voices';
 import assert from 'node:assert/strict';
 import { fixtures } from '../lib/scenarios/fixtures';
 import { fingerprint, similarity } from '../lib/scenarios/fingerprint';
-import { validateScenario } from '../lib/scenarios/validate';
+import { validateScenario, validateCaseSet } from '../lib/scenarios/validate';
 import { briefing, notebook, score, suggestions } from '../lib/scenarios/engine';
 import { generateScenario, HumanReviewRequired, StructuredJsonProvider, type JsonProvider } from '../lib/scenarios/generator';
 import type { Scenario } from '../lib/scenarios/schema';
 const clone = (index = 0) => structuredClone(fixtures[index]);
 const validateChanged = (s: Scenario) => { s.fingerprint = fingerprint(s); return validateScenario(s); };
 test('eight diverse handcrafted mysteries satisfy the same production validator', () => {
- assert.equal(fixtures.length, 8); assert.equal(new Set(fixtures.map(s => s.fingerprint)).size, 8);
- assert.equal(new Set(fixtures.map(s => s.setting)).size, 8);
+ assert.equal(fixtures.length, 16); assert.equal(new Set(fixtures.map(s => s.fingerprint)).size, 16);
+ assert.equal(new Set(fixtures.map(s => s.setting)).size, 16);
  for (const s of fixtures) assert.deepEqual(validateScenario(s).errors, [], s.title);
- assert.equal(fixtures.filter(s => s.truth.guilty).length, 4);
+ assert.equal(fixtures.filter(s => s.truth.guilty).length, 8);
+ for (const s of fixtures) assert.equal(s.answerKey.pivotal.filter(p => s.publicEvidence.some(e => e.id === p.evidenceId)).length, 1, s.title);
+ assert.deepEqual(validateCaseSet(fixtures), []);
 });
 test('an innocent suspect with an explicitly permitted unrelated lie remains innocent', () => {
  const s = clone(1); assert.ok(s.knowledge.misleading.length); assert.equal(s.truth.guilty, false);
@@ -56,8 +58,9 @@ test('public DTOs contain no truth, answer keys, unlock conditions or undiscover
  const serialized = JSON.stringify(dto);
  for (const forbidden of ['answerKey','interpretation','trigger','truth','knowledge','revealsFactIds','prerequisiteIds',s.truth.actualEvent,s.discoverableEvidence[0].description]) assert.equal(serialized.includes(forbidden), false, forbidden);
  assert.equal(dto.initialSuggestedQuestions.length, 3);
+ assert.equal('category' in dto.initialSuggestedQuestions[0], false);
  assert.equal(dto.publicEvidence.some(e => (e.category as string) === 'red_herring'), false);
- assert.equal(dto.publicEvidence.find(e => e.id === 'report-1')?.category, 'testimony');
+ assert.equal(dto.publicEvidence.find(e => e.id === clone().redHerrings[0].id)?.category, 'testimony');
 });
 test('evidence IDs cannot reveal private classifications', () => {
  const s = clone(); s.redHerrings[0].id = 'red-herring-1'; s.answerKey.misleading[0].evidenceId = 'red-herring-1';
@@ -69,7 +72,7 @@ test('question selection is pure and cannot unlock a clue; fact discovery unlock
  assert.deepEqual(facts, []); assert.equal(notebook(s, facts).length, 4);
  assert.equal(notebook(s, ['fact-1']).length, 5);
  const hiddenRed = clone(); hiddenRed.redHerrings[0].availability = 'discoverable'; hiddenRed.redHerrings[0].trigger.allFactIds = ['fact-1'];
- assert.equal(notebook(hiddenRed, ['fact-1']).find(e => e.id === 'report-1')?.category, 'testimony');
+ assert.equal(notebook(hiddenRed, ['fact-1']).find(e => e.id === hiddenRed.redHerrings[0].id)?.category, 'testimony');
  assert.ok(suggestions(s, ['fact-1']).questions.some(q => q.id === 'question-5'));
  assert.equal(suggestions(s, [], 3).more, null);
  assert.throws(() => suggestions(s, [], -1));
@@ -77,12 +80,20 @@ test('question selection is pure and cannot unlock a clue; fact discovery unlock
 test('deterministic score caps, rounding, unknown facts, duplicate citations and misleading evidence', () => {
  const s = clone(), allFacts = s.knowledge.facts.map(f => f.id), pivotal = s.answerKey.pivotal.map(p => p.evidenceId);
  assert.equal(score(s, 'guilty', pivotal, allFacts, 0).total, 1000);
- assert.equal(score(s, 'innocent', pivotal, allFacts, 180).total, 450);
- assert.equal(score(s, 'guilty', ['report-1'], [], 180).evidencePoints, 0);
- assert.equal(score(s, 'guilty', pivotal, [], 180).evidencePoints, 0);
+ assert.equal(score(s, 'innocent', pivotal, allFacts, 180).total, 150);
+ assert.equal(score(s, 'innocent', pivotal, allFacts, 180).evidencePoints, 0);
+ assert.equal(score(s, 'guilty', [s.redHerrings[0].id], [], 180).evidencePoints, 0);
+ // One pivotal item in each case is public, so a sharp reader scores without any facts.
+ assert.equal(score(s, 'guilty', pivotal.filter(id => s.publicEvidence.some(e => e.id === id)), [], 180).evidencePoints, Math.floor(300 / pivotal.length));
+ const everything = notebook(s, allFacts).map(e => e.id);
+ assert.ok(everything.length >= pivotal.length * 2);
+ assert.equal(score(s, 'guilty', everything, allFacts, 180).evidencePoints, 0);
+ assert.equal(score(s, 'guilty', [...pivotal, s.redHerrings[0].id], allFacts, 180).evidencePoints, Math.floor(300 * (pivotal.length - 1) / pivotal.length));
  assert.deepEqual(score(s, 'guilty', [...pivotal,...pivotal], [...allFacts,...allFacts,'unknown'], 90), score(s, 'guilty', pivotal, allFacts, 90));
  assert.equal(score(s, 'guilty', [], ['fact-1'], 90).factPoints, 37);
- assert.equal(score(s, 'guilty', [], [], 999).timePoints, 0);
+ assert.equal(score(s, 'guilty', [], ['fact-1'], 999).timePoints, 0);
+ assert.equal(score(s, 'guilty', [], [], 0).timePoints, 0);
+ assert.equal(score(s, 'guilty', [], ['fact-1'], 0).timePoints, 50);
  assert.throws(() => score(s, 'guilty', [], [], NaN));
 });
 test('generation retries are bounded and feed deterministic failures back to author', async () => {
@@ -164,4 +175,11 @@ test('SQL roster and application actor/voice catalog agree', async () => {
  const rows=[...sql.matchAll(/\('([a-f0-9-]{36})','[^']+','([^']+)'\)/g)].map(match=>[match[1],match[2]]);
  assert.equal(rows.length,14);
  assert.deepEqual(rows.sort(),AVATAR_VOICES.map(v=>[v.avatarId,v.voiceId]).sort());
+});
+
+test('scripts/data matches the migrations and cases: run pnpm data:build if this fails', async () => {
+ const { readFile, readdir } = await import('node:fs/promises');
+ const cases = await readFile('scripts/data/cases.sql', 'utf8'), install = await readFile('scripts/data/install.sql', 'utf8');
+ for (const s of fixtures) { assert.ok(cases.includes(s.fingerprint), s.title); assert.ok(install.includes(s.fingerprint), s.title); }
+ for (const file of await readdir('supabase/migrations')) assert.ok(install.includes(file), file);
 });

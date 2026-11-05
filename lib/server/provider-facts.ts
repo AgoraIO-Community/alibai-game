@@ -1,7 +1,7 @@
 import './only';
 import { createHash } from 'node:crypto';
 import { getSuspectProviderHistory } from '../agora/server-agent';
-import { matchProviderDisclosure } from '../scenarios/provider-disclosures';
+import { matchProviderDisclosures } from '../scenarios/provider-disclosures';
 import { GameError, rest } from './db';
 import { loadSession, readProjection, recordFactRevealed, recordTranscriptTurn } from './game';
 
@@ -10,8 +10,8 @@ const SKIPPABLE = new Set(['UNSUPPORTED_DISCLOSURE', 'UNVERIFIED_DISCLOSURE', 'T
 /**
  * Owner-authenticated polling trigger only: accepts no transcript or fact IDs.
  * Provider memory verifies model output, not audio delivery (managed history has
- * no per-turn playback timestamps). Full-utterance matching deliberately fails
- * closed on paraphrases, quoted facts inside denials, and ambiguous text.
+ * no per-turn playback timestamps). Matching asserts a scripted spoken line inside
+ * a sentence and fails closed on denials, questions, quotes and ambiguous text.
  */
 export async function syncProviderFacts(playerId: string, sessionId: string) {
   const snapshot = await loadSession(playerId, sessionId);
@@ -24,17 +24,18 @@ export async function syncProviderFacts(playerId: string, sessionId: string) {
   const discovered = new Set(snapshot.factIds);
   const source = 'agora-provider-history';
   for (const message of history) {
-    const fact = matchProviderDisclosure(snapshot.scenario, message.role, message.content, discovered);
-    if (!fact) continue;
+    const facts = matchProviderDisclosures(snapshot.scenario, message.role, message.content, discovered);
+    if (!facts.length) continue;
     // History has no stable managed turn IDs and its window shifts. Hash exact
     // text with agent ID, not array index; repeated disclosures earn no points.
-    // Postgres trim() strips only spaces, so store the text the matcher actually compared.
     const transcript = message.content.trim();
     const turnId = `agora-history-${createHash('sha256').update(agentId).update('\0').update(transcript).digest('hex')}`;
     try {
       await recordTranscriptTurn(sessionId, { turnId, actor: 'suspect', transcript, source });
-      await recordFactRevealed(sessionId, fact.id, turnId, source);
-      discovered.add(fact.id);
+      for (const fact of facts) {
+        await recordFactRevealed(sessionId, fact.id, turnId, source);
+        discovered.add(fact.id);
+      }
     } catch (error) {
       // This turn stays in history, so a rejection must not block the turns after it.
       if (!(error instanceof GameError) || !SKIPPABLE.has(error.code)) throw error;

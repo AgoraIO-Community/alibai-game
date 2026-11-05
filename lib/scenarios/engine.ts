@@ -1,5 +1,7 @@
 import { allEvidence, publicEvidenceDTO, questionDTO, type Scenario } from './schema';
-export function notebook(s:Scenario,factIds:string[]){const found=new Set(factIds);return allEvidence(s).filter(e=>e.availability==='public'||e.trigger.allFactIds.every(id=>found.has(id))).map(publicEvidenceDTO)}
+export function notebook(s:Scenario,factIds:string[]){const found=new Set(factIds);const shown=allEvidence(s).filter(e=>e.availability==='public'||e.trigger.allFactIds.every(id=>found.has(id)));
+ // Sorted by ID so a red herring is not always the last public card.
+ return [...shown.filter(e=>e.availability==='public').sort((a,b)=>a.id.localeCompare(b.id)),...shown.filter(e=>e.availability!=='public')].map(publicEvidenceDTO)}
 export function suggestions(s:Scenario,factIds:string[],offset=0){
  if (!Number.isInteger(offset) || offset < 0) throw new Error('Invalid question offset');
  const known=new Set([...factIds,...notebook(s,factIds).map(e=>e.id)]);
@@ -12,8 +14,10 @@ export function score(s:Scenario,verdict:'guilty'|'innocent',evidenceIds:string[
  const cited=new Set(evidenceIds),found=new Set(factIds.filter(id=>s.knowledge.facts.some(f=>f.id===id)));
  const visible=new Set(notebook(s,[...found]).map(e=>e.id));
  const verdictPoints=verdict===s.answerKey.verdict?500:0;
- const evidencePoints=Math.floor(300*s.answerKey.pivotal.filter(p=>cited.has(p.evidenceId)&&visible.has(p.evidenceId)).length/s.answerKey.pivotal.length);
+ // Mirrors session_action: a wrong verdict earns no evidence points, and a citation that isn't pivotal cancels one that is.
+ const hits=s.answerKey.pivotal.filter(p=>cited.has(p.evidenceId)&&visible.has(p.evidenceId)).length;
+ const evidencePoints=verdictPoints?Math.floor(300*Math.max(0,hits-(cited.size-hits))/s.answerKey.pivotal.length):0;
  const factPoints=Math.floor(150*found.size/s.knowledge.facts.length);
- const timePoints=Math.floor(50*Math.max(0,180-Math.max(0,elapsedSeconds))/180);
+ const timePoints=found.size?Math.floor(50*Math.max(0,180-Math.max(0,elapsedSeconds))/180):0;
  return {verdictPoints,evidencePoints,factPoints,timePoints,total:verdictPoints+evidencePoints+factPoints+timePoints,scoringVersion:1,reasonCodes:[verdictPoints?'VERDICT_CORRECT':'VERDICT_INCORRECT',...(evidencePoints<300?['PIVOTAL_EVIDENCE_MISSING']:[])]};
 }
