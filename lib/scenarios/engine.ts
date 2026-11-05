@@ -1,4 +1,4 @@
-import { allEvidence, publicEvidenceDTO, questionDTO, type Scenario } from './schema';
+import { allEvidence, publicEvidenceDTO, publicSuspectDTO, questionDTO, type Scenario } from './schema';
 export function notebook(s:Scenario,factIds:string[]){const found=new Set(factIds);const shown=allEvidence(s).filter(e=>e.availability==='public'||e.trigger.allFactIds.every(id=>found.has(id)));
  // Sorted by ID so a red herring is not always the last public card.
  return [...shown.filter(e=>e.availability==='public').sort((a,b)=>a.id.localeCompare(b.id)),...shown.filter(e=>e.availability!=='public')].map(publicEvidenceDTO)}
@@ -8,7 +8,7 @@ export function suggestions(s:Scenario,factIds:string[],offset=0){
  const eligible=s.suggestedQuestions.filter(q=>q.spoilerSafety!=='spoiler'&&q.prerequisiteIds.every(id=>known.has(id))).sort((a,b)=>a.priority-b.priority||a.id.localeCompare(b.id));
  return {questions:eligible.slice(offset,offset+3).map(questionDTO),more:offset+3<eligible.length?offset+3:null};
 }
-export function briefing(s:Scenario,sessionId:string,casting?:{avatarId:string;voiceId:string}){return {sessionId,caseId:s.scenarioId,title:s.title,publicBriefing:s.publicBriefing,publicSuspect:{...s.suspect,...casting},publicEvidence:notebook(s,[]),initialSuggestedQuestions:suggestions(s,[]).questions}}
+export function briefing(s:Scenario,sessionId:string,casting?:{avatarId:string;voiceId:string}){return {sessionId,caseId:s.scenarioId,title:s.title,publicBriefing:s.publicBriefing,publicSuspect:{...publicSuspectDTO(s.suspect),...casting},publicEvidence:notebook(s,[]),initialSuggestedQuestions:suggestions(s,[]).questions}}
 export function score(s:Scenario,verdict:'guilty'|'innocent',evidenceIds:string[],factIds:string[],elapsedSeconds:number){
  if (!Number.isFinite(elapsedSeconds)) throw new Error('Invalid elapsed time');
  const cited=new Set(evidenceIds),found=new Set(factIds.filter(id=>s.knowledge.facts.some(f=>f.id===id)));
