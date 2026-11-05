@@ -106,7 +106,7 @@ supabase/migrations/      schema source of truth
 tests/                    unit.test.ts, provider-facts.test.ts, db.test.ts
 ```
 
-`lib/game/types.ts` and these components are v0 leftovers that nothing renders: `voice-controls`, `suspect-avatar`, `interrogation-timer`, `live-transcript`, `voice-waveform`.
+`lib/game/types.ts` and these components are v0 leftovers that nothing renders: `voice-controls`, `interrogation-timer`, `live-transcript`, `voice-waveform`.
 
 ## How a game runs
 
