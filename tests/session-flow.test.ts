@@ -1,8 +1,11 @@
 import test, { afterEach, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
+import { readFile } from 'node:fs/promises';
 import { fixtures } from '../lib/scenarios/fixtures';
 import { syncProviderFacts } from '../lib/server/provider-facts';
+import { handle } from '../lib/server/http';
+import { GameError } from '../lib/server/db';
 
 // No network: every request lands in this stub, using made-up configuration.
 const fake = { NEXT_PUBLIC_SUPABASE_URL: 'http://supabase.invalid', SUPABASE_SECRET_KEY: 'sb_secret_test', NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: 'test', NEXT_PUBLIC_AGORA_APP_ID: 'a'.repeat(32), NEXT_AGORA_APP_CERTIFICATE: 'b'.repeat(32), ANAM_API_KEY: 'test' };
@@ -46,4 +49,13 @@ test('a sync that records a fact re-reads so the view includes it', async () => 
 test('a sync still refuses a session that is not active', async () => {
   sessionRow = { ...sessionRow, state: 'ended' };
   await assert.rejects(syncProviderFacts(playerId, sessionId), { code: 'NOT_ACTIVE' });
+});
+test('only the leaderboard is CDN cached, and errors never are', async () => {
+  const route = await readFile('app/api/leaderboard/route.ts', 'utf8');
+  assert.match(route, /'s-maxage=10, stale-while-revalidate=30'/);
+  assert.equal((await handle(async () => ({}))).headers.get('Cache-Control'), 'no-store');
+  const cached = 's-maxage=10';
+  assert.equal((await handle(async () => ({}), cached)).headers.get('Cache-Control'), cached);
+  assert.equal((await handle(async () => { throw new GameError('POOL_BUSY', 409); }, cached)).headers.get('Cache-Control'), null);
+  for (const path of ['app/api/sessions/route.ts', 'app/api/sessions/[id]/[action]/route.ts', 'app/api/auth/route.ts', 'app/api/realtime-auth/route.ts']) assert.doesNotMatch(await readFile(path, 'utf8'), /s-maxage/, path);
 });
