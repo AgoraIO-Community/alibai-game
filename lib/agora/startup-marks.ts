@@ -9,7 +9,8 @@
  * -joined (user-joined), -published-{audio,video} (user-published), -decoded-{audio,video}
  * (first decoded frame), and finally ready (the server started the clock).
  */
-export function startupMarks(began = performance.now()) {
+export function startupMarks() {
+  const began = performance.now()
   const marks: Record<string, number> = {}
   return {
     mark(name: string) {
