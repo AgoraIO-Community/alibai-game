@@ -1,4 +1,4 @@
-import { startVoice,readyVoice,stopVoice } from '@/lib/server/voice';
+import { connectVoice,readyVoice,stopVoice } from '@/lib/server/voice';
 import { syncProviderFacts } from '@/lib/server/provider-facts';
 import { z } from 'zod';
 import { authenticate,checkOrigin } from '@/lib/server/auth';
@@ -6,6 +6,8 @@ import { getNotebook,getSuggestedQuestions,readProjection,submitVerdict,transiti
 import { GameError,rpc } from '@/lib/server/db';
 import { body,handle } from '@/lib/server/http';
 export const runtime='nodejs';
+// `connect` starts the agent in after(), which shares this limit. See docs/agora.md.
+export const maxDuration=300;
 type Context={params:Promise<{id:string;action:string}>};
 export async function GET(request:Request,context:Context){return handle(async()=>{const user=await authenticate(request),{id,action}=await context.params;z.uuid().parse(id);if(action==='read')return readProjection(user.id,id);if(action==='notebook')return getNotebook(user.id,id);if(action==='questions')return getSuggestedQuestions(user.id,id,z.coerce.number().int().min(0).max(100).parse(new URL(request.url).searchParams.get('offset')??0));throw new GameError('NOT_FOUND',404)})}
-export async function POST(request:Request,context:Context){return handle(async()=>{checkOrigin(request);const user=await authenticate(request),{id,action}=await context.params;z.uuid().parse(id);if(action==='sync-facts')return syncProviderFacts(user.id,id);if(action==='agent')return startVoice(user.id,id);if(action==='agent-ready')return readyVoice(user.id,id);if(action==='start'){if(process.env.ENABLE_MANUAL_INTERVIEW!=='true')throw new GameError('MEDIA_NOT_CONFIGURED',503);return transition(user.id,id,'start')}if(action==='end'){await syncProviderFacts(user.id,id).catch(()=>{});await rpc('end_session',{p_player:user.id,p_session:id});await stopVoice(user.id,id).catch(()=>console.error('Agent stop requires cleanup retry'));return readProjection(user.id,id);}if(action==='verdict')return submitVerdict(user.id,id,await body(request));throw new GameError('NOT_FOUND',404)})}
+export async function POST(request:Request,context:Context){return handle(async()=>{checkOrigin(request);const user=await authenticate(request),{id,action}=await context.params;z.uuid().parse(id);if(action==='sync-facts')return syncProviderFacts(user.id,id);if(action==='connect')return connectVoice(user.id,id);if(action==='ready')return readyVoice(user.id,id);if(action==='start'){if(process.env.ENABLE_MANUAL_INTERVIEW!=='true')throw new GameError('MEDIA_NOT_CONFIGURED',503);return transition(user.id,id,'start')}if(action==='end'){await syncProviderFacts(user.id,id).catch(()=>{});await rpc('end_session',{p_player:user.id,p_session:id});await stopVoice(user.id,id).catch(()=>console.error('Agent stop requires cleanup retry'));return readProjection(user.id,id);}if(action==='verdict')return submitVerdict(user.id,id,await body(request));throw new GameError('NOT_FOUND',404)})}

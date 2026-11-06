@@ -34,6 +34,7 @@ export interface SessionView {
   }
 }
 const messages: Record<string, string> = {
+  AUTH_UNAVAILABLE: 'Sign-in checks are briefly unavailable. Please try again in a moment.',
   LOGIN_REQUIRED: 'Please sign in at the rules page to continue.',
   INVALID_LOGIN: 'Sign in failed. Check your email, password and email confirmation.',
   SIGNUP_FAILED: 'Could not create your account. Check your details or try signing in.',
@@ -44,16 +45,20 @@ const messages: Record<string, string> = {
   END_INTERROGATION_FIRST: 'End the interrogation before filing your verdict.',
   VERDICT_LOCKED: 'Your verdict is already filed. Open the results to review it.',
   AGENT_START_PENDING: 'The suspect is still being brought in. Please wait a moment and retry.',
+  AGENT_START_FAILED: 'The suspect could not be reached. Your clock never started. Please request another case.',
   AGENT_NOT_READY: 'The suspect is not ready yet. Please retry the connection.',
   AGENT_STATE_CONFLICT: 'This interview was cancelled before the suspect arrived. Request another case.',
   MEDIA_NOT_CONFIGURED: 'The voice interview is not configured yet. Your case is saved and the clock has not started.',
+}
+export class GameRequestError extends Error {
+  constructor(message: string, public code?: string) { super(message) }
 }
 export async function gameRequest<T>(path: string, init: RequestInit = {}): Promise<T> {
   const response = await fetch(path, { ...init, credentials: 'same-origin', cache: 'no-store', headers: { 'Content-Type': 'application/json', ...init.headers } })
   const body = await response.json().catch(() => ({}))
   if (!response.ok) {
     const code = typeof body.error === 'string' ? body.error : body.error?.code ?? body.code
-    throw new Error(messages[code] ?? 'The bureau could not complete that request. Please try again.')
+    throw new GameRequestError(messages[code] ?? 'The bureau could not complete that request. Please try again.', code)
   }
   return body as T
 }

@@ -182,7 +182,7 @@ test('captions stay display only and outside the media readiness gate', async ()
   const [helper, hook, session, route] = await Promise.all(['lib/agora/live-transcript.ts', 'lib/agora/use-suspect-voice.ts', 'components/game/production-session.tsx', 'app/api/sessions/[id]/[action]/route.ts'].map(path => readFile(path, 'utf8')));
   assert.doesNotMatch(helper, /sessionRequest|gameRequest|\bfetch\(|lib\/game\/api/);
   // The hook's only server actions remain the media lifecycle, none carrying a transcript.
-  assert.deepEqual([...new Set([...hook.matchAll(/sessionRequest(?:<\w+>)?\(sessionId,\s*'([^']+)'/g)].map(match => match[1]))].sort(), ['agent', 'agent-ready', 'end']);
+  assert.deepEqual([...new Set([...hook.matchAll(/sessionRequest(?:<\w+>)?\(sessionId,\s*'([^']+)'/g)].map(match => match[1]))].sort(), ['connect', 'end', 'read', 'ready']);
   assert.doesNotMatch(hook, /sessionRequest(?:<\w+>)?\(sessionId,\s*'[^']+',\s*(?:[^\s{]|\{[^}])/);
   assert.match(hook, /!published \|\| !audioDecoded \|\| !videoDecoded \|\| failedAutoplay/);
   assert.doesNotMatch(hook, /await connectLiveTranscript/);
