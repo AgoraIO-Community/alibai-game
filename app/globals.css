@@ -221,16 +221,21 @@
 }
 
 /* The suspect's avatar stream arrives bright and clean. These pull it into the room's palette:
-   the film dims and warms the video itself, the vignette darkens the edges to near obsidian while
-   leaving the face, which sits in the upper middle of the frame, clear. */
+   the film dims and warms the video itself, the vignette darkens the edges towards obsidian while
+   leaving the face, which sits in the upper middle of the frame, clear. The SDK's player fills the
+   stage (object-fit: cover), so when a frame must be cropped top to bottom the head is kept by
+   anchoring the crop near the top rather than the centre. */
 @utility stage-film {
   filter: brightness(0.66) saturate(0.74) sepia(0.22) contrast(1.08);
+  & video {
+    object-position: 50% 15%;
+  }
 }
 
 @utility stage-vignette {
   background:
-    radial-gradient(ellipse 56% 56% at 50% 44%, transparent 0%, transparent 36%, rgba(16, 17, 19, 0.45) 64%, rgba(16, 17, 19, 0.96) 100%),
-    linear-gradient(180deg, rgba(16, 17, 19, 0.55), transparent 26%);
+    radial-gradient(ellipse 66% 62% at 50% 42%, transparent 0%, transparent 38%, rgba(16, 17, 19, 0.42) 70%, rgba(16, 17, 19, 0.9) 100%),
+    linear-gradient(180deg, rgba(16, 17, 19, 0.5), transparent 24%);
 }
 
 @utility text-balance {
