@@ -54,7 +54,7 @@ Check facts about live systems before relying on them. Status notes here can go 
 | --- | --- |
 | Production | https://alibai-game.vercel.app/ |
 | GitHub | `digitallysavvy/alibai-game` |
-| Vercel | project `alibai-ui`, team scope `digitallysavvys-projects`. Pushing to `main` deploys production |
+| Vercel | project `alibai-ui`, team scope `digitallysavvys-projects`, functions in `pdx1` next to Supabase (`vercel.json`). Pushing to `main` deploys production |
 | Supabase | project **Alibai**, ref `vfqxxkvokbgrooxhkdmi` |
 | Agora | project **testing** |
 | Sodabase | https://sodabase.io/projects/vfqxxkvokbgrooxhkdmi |
@@ -106,7 +106,7 @@ supabase/migrations/      schema source of truth
 tests/                    unit.test.ts, provider-facts.test.ts, db.test.ts
 ```
 
-`lib/game/types.ts` and these components are v0 leftovers that nothing renders: `voice-controls`, `suspect-avatar`, `interrogation-timer`, `live-transcript`, `voice-waveform`.
+`lib/game/types.ts` and these components are v0 leftovers that nothing renders: `voice-controls`, `interrogation-timer`, `live-transcript`, `voice-waveform`.
 
 ## How a game runs
 
@@ -115,7 +115,7 @@ Session states: `created → preparing → active → ended → scored`, or `aba
 1. `POST /api/sessions` runs `assign_scenario`. That picks an unplayed case and freezes one avatar and one voice on the session.
 2. The player reads the briefing and enters the room, which connects automatically.
 3. `POST .../connect` is the room's first call. `session_connect` checks the owner, reads the session and claims the run in one call. The route returns the view and RTC credentials at once, then starts the agent in `after()` and commits it. It also renews tokens and reconnects, and only the call that wins the claim starts an agent.
-4. The browser joins and publishes the mic straight away, without waiting for Agora. Once suspect audio **and** video decode, `POST .../ready` starts the clock through `session_ready` and returns the view. A start acknowledgement alone never starts it. A background failure abandons the session, and the browser sees that through polling, Realtime or `ready`.
+4. The browser joins and publishes the mic straight away, without waiting for Agora. Once suspect audio **and** video decode, the suspect shows and `POST .../ready` starts the clock through `session_ready` and returns the view. A start acknowledgement alone never starts it. A background failure abandons the session, and the browser sees that through polling, Realtime or `ready`.
 5. Every 5 seconds, `sync-facts` reads provider history on the server and records verified facts, which unlock evidence and follow-up questions.
 6. `POST .../end` runs a final sync, ends the session, and stops the agent.
 7. `POST .../verdict` accepts one verdict. SQL calculates the score.
@@ -126,7 +126,7 @@ Scoring: verdict 500, pivotal evidence 300, facts 150, time 50. Evidence points 
 
 - Secrets stay on the server. Never send truth, answer keys, unlock conditions or undiscovered evidence to the browser. Public shapes come from `publicEvidenceDTO`, `questionDTO`, `briefing` and `notebook`.
 - Browsers can't award facts. No client request may carry a transcript, fact ID or score. Live captions are display only.
-- The server owns time. Browser timers are for display, and the countdown is corrected with `serverTime`.
+- The server owns time. Browser timers are for display, and the countdown is corrected with `serverTime`. The tick lives in `session-clock.tsx`, so it doesn't re-render the session.
 - Every client-reachable table has RLS. Game RPCs are service-role only. Don't add broad grants to make something work.
 - Guilt is fixed per case. Scenario content and session casting are immutable, enforced by triggers.
 - Avatars are cast performers. Their studio names and personas never replace the dossier's suspect. Use `avatarId`, not `personaId`.

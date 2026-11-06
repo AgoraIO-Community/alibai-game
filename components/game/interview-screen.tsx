@@ -5,10 +5,12 @@ import { useState } from 'react'
 import { Mic, MicOff } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import type { PublicQuestion, SessionView } from '@/lib/game/api'
+import type { ClockTiming } from '@/lib/game/clock'
 import type { useSuspectVoice } from '@/lib/agora/use-suspect-voice'
 import { cn } from '@/lib/utils'
 import { Eyebrow, StatusDot } from './deco'
 import { DetectiveNotebook } from './detective-notebook'
+import { InterviewClock } from './session-clock'
 import { SuggestedQuestions } from './suggested-questions'
 import { TapeRecorder } from './tape-recorder'
 
@@ -23,12 +25,11 @@ const quietButton = 'min-h-12 rounded-none border border-gold/50 bg-transparent 
  * stage on phones. Everything fits one viewport; the panels scroll inside themselves. Handlers and
  * conditions belong to ProductionSession; this only lays them out.
  */
-export function InterviewScreen({ view, error, busy, clock, left, voice, questions, more, selectedQuestion, onSelectQuestion, onNextQuestions, onRefresh, onCancelConnection, onRetryConnection, onEndInterview }: {
+export function InterviewScreen({ view, error, busy, timing, voice, questions, more, selectedQuestion, onSelectQuestion, onNextQuestions, onRefresh, onCancelConnection, onRetryConnection, onEndInterview }: {
   view: SessionView | null
   error: string
   busy: boolean
-  clock: string
-  left: number
+  timing: ClockTiming
   voice: SuspectVoice
   questions: PublicQuestion[]
   more: number | null
@@ -42,11 +43,9 @@ export function InterviewScreen({ view, error, busy, clock, left, voice, questio
 }) {
   const [panel, setPanel] = useState<'questions' | 'tape' | 'notebook'>('questions')
   const state = view?.session.state
-  const live = ['live','reconnecting'].includes(voice.phase)
+  const live = ['live','starting_clock','reconnecting'].includes(voice.phase)
   const closed = state === 'ended' || state === 'scored'
   const counting = state === 'active' && !closed
-  const lowTime = counting && left <= 30
-  const finalSeconds = counting && left <= 10
   const line = voice.phase === 'live' ? { tone: 'verdigris' as const, pulse: true, label: 'Live' }
     : voice.phase === 'reconnecting' ? { tone: 'gold' as const, pulse: true, label: 'Reconnecting' }
     : ['error','ended'].includes(voice.phase) ? { tone: closed ? 'muted' as const : 'oxblood' as const, pulse: false, label: closed ? 'Closed' : 'Line down' }
@@ -62,10 +61,7 @@ export function InterviewScreen({ view, error, busy, clock, left, voice, questio
             <p className="hidden truncate text-sm text-gold sm:block">{view.briefing.publicSuspect.name} · {view.briefing.publicSuspect.role}</p>
           </>}
         </div>
-        <div className="flex shrink-0 flex-col items-end">
-          <time className={cn('font-mono text-2xl tabular-nums leading-none tracking-wider sm:text-3xl', finalSeconds ? 'bg-oxblood px-2 py-1 text-ivory animate-pulse motion-reduce:animate-none' : lowTime ? 'text-gold' : counting ? 'text-ivory' : 'text-gold')} aria-label={`${clock} remaining`}>{clock}</time>
-          <p className="label-mono mt-1 text-ivory/50" aria-live="polite">{finalSeconds ? 'Final seconds' : lowTime ? 'Thirty seconds' : closed ? 'Interview closed' : 'Remaining'}</p>
-        </div>
+        <InterviewClock timing={timing} counting={counting} closed={closed} />
       </header>
       {error && <div role="alert" className="mt-3 shrink-0 border border-oxblood bg-oxblood/20 p-3 text-sm">{error}<button type="button" onClick={onRefresh} className="ml-3 underline">Retry</button></div>}
       {!view ? <p className="mt-12 label-mono">Opening case file…</p> : <>
@@ -105,13 +101,13 @@ export function InterviewScreen({ view, error, busy, clock, left, voice, questio
           {/* Right column. On phones the wrapper contributes nothing (contents) and each panel is its own tab; on lg the
               deck takes a fixed share of the column so the transcript stays near the top and the notebook fills the rest. */}
           <div className="contents lg:order-3 lg:flex lg:min-h-0 lg:flex-col lg:gap-3">
-            <TapeRecorder id="interview-tape" lines={voice.transcript} status={voice.transcriptStatus} suspectName={view.briefing.publicSuspect.name} running={voice.phase === 'live'} closed={closed} left={left} className={cn('min-h-64 flex-1 contain-size lg:h-[clamp(17rem,46dvh,25rem)] lg:min-h-0 lg:flex-none lg:contain-none', panel === 'tape' ? 'flex' : 'hidden lg:flex')} />
+            <TapeRecorder id="interview-tape" lines={voice.transcript} status={voice.transcriptStatus} suspectName={view.briefing.publicSuspect.name} running={voice.phase === 'live'} closed={closed} timing={timing} className={cn('min-h-64 flex-1 contain-size lg:h-[clamp(17rem,46dvh,25rem)] lg:min-h-0 lg:flex-none lg:contain-none', panel === 'tape' ? 'flex' : 'hidden lg:flex')} />
             <DetectiveNotebook id="interview-notebook" items={view.notebook} onRefresh={onRefresh} className={cn('min-h-52 flex-1 contain-size lg:min-h-0 lg:contain-none', panel === 'notebook' ? 'flex' : 'hidden lg:flex')} />
           </div>
         </div>
         <footer className="mt-3 flex shrink-0 flex-col gap-2 border-t border-gold/20 pt-2.5 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
           <div className="min-w-0 flex-1">
-            <p role="status" className="flex items-center gap-2 text-xs text-gold sm:text-sm"><StatusDot tone={line.tone} pulse={line.pulse} className="shrink-0" />{voice.phase === 'live' ? 'Connected · Your microphone is live' : voice.phase === 'reconnecting' ? 'Reconnecting · The interview clock continues' : view.session.state === 'ended' || view.session.state === 'scored' ? 'Interview closed' : 'Your clock starts after audio and video connect.'}</p>
+            <p role="status" className="flex items-center gap-2 text-xs text-gold sm:text-sm"><StatusDot tone={line.tone} pulse={line.pulse} className="shrink-0" />{voice.phase === 'live' ? 'Connected · Your microphone is live' : voice.phase === 'starting_clock' ? 'Suspect connected · Confirming the clock…' : voice.phase === 'reconnecting' ? 'Reconnecting · The interview clock continues' : view.session.state === 'ended' || view.session.state === 'scored' ? 'Interview closed' : 'Your clock starts after audio and video connect.'}</p>
             {voice.error && <p role="alert" className="mt-1 text-xs text-ivory sm:text-sm">{voice.error}</p>}
           </div>
           {/* On phones every action shares the row equally and labels shorten, so error states stay two rows at most. */}

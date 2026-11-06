@@ -62,4 +62,6 @@ export async function gameRequest<T>(path: string, init: RequestInit = {}): Prom
   }
   return body as T
 }
+/** A unique query string misses the CDN, for a player who needs to see their own score now. */
+export const leaderboardPath = (fresh = false) => fresh ? `/api/leaderboard?fresh=${Date.now()}-${Math.random().toString(36).slice(2)}` : '/api/leaderboard'
 export const sessionRequest = <T>(id: string, action: string, body?: unknown) => gameRequest<T>(`/api/sessions/${encodeURIComponent(id)}/${action}`, body === undefined ? {} : { method: 'POST', body: JSON.stringify(body) })

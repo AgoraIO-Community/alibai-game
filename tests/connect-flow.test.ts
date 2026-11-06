@@ -6,7 +6,8 @@ import { AVATAR_CATALOG } from '../lib/game/avatar-catalog';
 import { getAvatarVoice } from '../lib/game/avatar-voices';
 import { fixtures } from '../lib/scenarios/fixtures';
 import { GameError } from '../lib/server/db';
-import { projection, type SessionRow, type Snapshot } from '../lib/server/game';
+import { projectSnapshot, type SessionRow, type Snapshot } from '../lib/server/game';
+import { noTimer, stepTimer } from '../lib/server/timing';
 import { connectVoice, readyVoice, startClaimedAgent } from '../lib/server/voice';
 
 // No network: Supabase and Agora land in this stub, using made-up configuration.
@@ -51,14 +52,14 @@ beforeEach(() => {
 });
 afterEach(() => { globalThis.fetch = realFetch; });
 
-const later = () => { const tasks: (() => unknown)[] = []; return { tasks, schedule: ((task: () => unknown) => { tasks.push(task); }) as never as Parameters<typeof connectVoice>[2] }; };
+const later = () => { const tasks: (() => unknown)[] = []; return { tasks, schedule: ((task: () => unknown) => { tasks.push(task); }) as never as Parameters<typeof connectVoice>[3] }; };
 const lifecycleActions = () => (rpcBodies.agent_lifecycle ?? []).map(body => body.p_action);
 const coded = (code: string) => (error: unknown) => error instanceof GameError && error.code === code;
 const quietly = async (work: () => Promise<unknown>) => { const real = console.error; console.error = () => {}; try { await work(); } finally { console.error = real; } };
 
 test('connect answers from one database call, before Agora is touched', async () => {
   const { tasks, schedule } = later();
-  const result = await connectVoice(playerId, sessionId, schedule);
+  const result = await connectVoice(playerId, sessionId, noTimer, schedule);
   assert.deepEqual(calls, ['session_connect']);
   assert.deepEqual(rpcBodies.session_connect, [{ p_player: playerId, p_session: sessionId }]);
   assert.equal(result.view.session.state, 'preparing');
@@ -69,14 +70,14 @@ test('connect answers from one database call, before Agora is touched', async ()
 test('connect exposes only allowlisted fields', async () => {
   const { schedule } = later();
   claim = { claimed: false, state: 'running', agentId: 'agent-secret' };
-  const result = await connectVoice(playerId, sessionId, schedule), text = JSON.stringify(result);
-  assert.deepEqual(result.view, { ...projection(snapshot), serverTime: result.view.serverTime });
+  const result = await connectVoice(playerId, sessionId, noTimer, schedule), text = JSON.stringify(result);
+  assert.deepEqual(result.view, { ...projectSnapshot(snapshot, sessionId), serverTime: result.view.serverTime });
   assert.deepEqual(Object.keys(result).sort(), ['connection', 'view']);
   for (const secret of ['agent-secret', 'answerKey', 'actualEvent', scenario.truth.explanation, fake.NEXT_AGORA_APP_CERTIFICATE, fake.ANAM_API_KEY]) assert.ok(!text.includes(secret), secret);
 });
 test('the background start commits with the claimed agent and sends one greeting', async () => {
   const { tasks, schedule } = later();
-  await connectVoice(playerId, sessionId, schedule);
+  await connectVoice(playerId, sessionId, noTimer, schedule);
   await tasks[0]();
   assert.deepEqual(calls.slice(1), ['agora-start', 'agent_lifecycle']);
   assert.deepEqual(rpcBodies.agent_lifecycle, [{ p_player: playerId, p_session: sessionId, p_action: 'commit', p_agent: 'agent-1' }]);
@@ -88,7 +89,7 @@ test('repeat connects, refreshes and renewals never schedule a second start', as
   for (const state of ['starting', 'running']) {
     const { tasks, schedule } = later();
     claim = { claimed: false, state, agentId: state === 'running' ? 'agent-1' : null };
-    const result = await connectVoice(playerId, sessionId, schedule);
+    const result = await connectVoice(playerId, sessionId, noTimer, schedule);
     assert.ok(result.connection?.rtcToken, `${state} renews tokens rather than returning 409`);
     assert.equal(tasks.length, 0);
   }
@@ -97,18 +98,46 @@ test('a run that cannot continue, or a session that cannot connect, gets a view 
   for (const next of [{ claimed: false, state: 'failed' }, { claimed: false, state: 'stopping', agentId: 'a' }, { claimed: false, state: 'stopped', agentId: 'a' }, null]) {
     const { tasks, schedule } = later();
     claim = next;
-    const result = await connectVoice(playerId, sessionId, schedule);
+    const result = await connectVoice(playerId, sessionId, noTimer, schedule);
     assert.equal(result.connection, null); assert.ok(result.view.briefing); assert.equal(tasks.length, 0);
   }
 });
 test('a failure to schedule the start releases the claim', async () => {
-  await assert.rejects(connectVoice(playerId, sessionId, (() => { throw new Error('No waitUntil'); }) as never), /No waitUntil/);
+  await assert.rejects(connectVoice(playerId, sessionId, noTimer, (() => { throw new Error('No waitUntil'); }) as never), /No waitUntil/);
   assert.deepEqual(lifecycleActions(), ['failed']);
 });
 test('missing Agora configuration releases the claim instead of leaving a run starting', async () => {
   delete process.env.NEXT_AGORA_APP_CERTIFICATE;
-  await assert.rejects(connectVoice(playerId, sessionId, later().schedule));
+  await assert.rejects(connectVoice(playerId, sessionId, noTimer, later().schedule));
   assert.deepEqual(lifecycleActions(), ['failed']);
+});
+test('the background start logs Agora and commit, with the time Agora returned', async () => {
+  const lines: string[] = [], before = Date.now();
+  await startClaimedAgent(playerId, sessionId, snapshot, stepTimer('agent-start', line => lines.push(line)));
+  assert.equal(lines.length, 1);
+  const logged = JSON.parse(lines[0].replace('[timing] agent-start ', ''));
+  for (const key of ['context', 'agora-start', 'commit', 'total']) assert.equal(typeof logged[key], 'number', key);
+  assert.ok(logged.agoraReturnedAt >= before && logged.agoraReturnedAt <= Date.now()); assert.equal(logged.ok, true);
+  for (const secret of [playerId, sessionId, 'agent-1']) assert.ok(!lines[0].includes(secret), secret);
+});
+test('a failed start still logs its timing line once', async () => {
+  failStart = 400;
+  const lines: string[] = [];
+  await quietly(() => startClaimedAgent(playerId, sessionId, snapshot, stepTimer('agent-start', line => lines.push(line))));
+  assert.equal(lines.length, 1); assert.equal(JSON.parse(lines[0].replace('[timing] agent-start ', '')).ok, false);
+});
+test('each ready attempt logs its steps, and a pending one says so', async () => {
+  const lines: string[] = [], timer = stepTimer('ready', line => lines.push(line));
+  runs = [{ agent_id: null, state: 'starting' }];
+  await assert.rejects(readyVoice(playerId, sessionId, timer), coded('AGENT_START_PENDING'));
+  timer.done();
+  assert.equal(JSON.parse(lines[0].replace('[timing] ready ', '')).pending, 1);
+  const done: string[] = [], next = stepTimer('ready', line => done.push(line));
+  runs = [{ agent_id: 'agent-1', state: 'running' }];
+  await readyVoice(playerId, sessionId, next); next.done();
+  const logged = JSON.parse(done[0].replace('[timing] ready ', ''));
+  for (const key of ['agent-run', 'agent-query', 'session-ready']) assert.equal(typeof logged[key], 'number', key);
+  assert.equal(logged.pending, undefined);
 });
 test('a failed Agora start records failed and throws nothing', async () => {
   failStart = 400;
@@ -159,7 +188,7 @@ test('the route keeps its budget for the background start, and the old routes ar
   const [route, hook] = await Promise.all(['app/api/sessions/[id]/[action]/route.ts', 'lib/agora/use-suspect-voice.ts'].map(file => readFile(file, 'utf8')));
   assert.match(route, /export const maxDuration=300;/);
   assert.match(route, /action==='connect'/); assert.match(route, /action==='ready'/);
-  assert.doesNotMatch(route, /'agent'|'agent-ready'/); assert.doesNotMatch(hook, /'agent'|'agent-ready'/);
+  assert.doesNotMatch(route, /'agent'|'agent-ready'/); assert.doesNotMatch(hook, /\(sessionId,\s*'agent(-ready)?'/);
   // Set before the request goes out, so leaving mid-request still ends the session.
   assert.ok(hook.indexOf('hasAgent.current = true') < hook.indexOf("<ConnectResponse>(sessionId, 'connect'"));
 });
