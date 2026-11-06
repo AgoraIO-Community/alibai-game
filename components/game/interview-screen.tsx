@@ -71,19 +71,20 @@ export function InterviewScreen({ view, error, busy, timing, voice, questions, m
             {/* The SDK inserts its own video element here, so the film and vignette sit on the container and an overlay. */}
             <div ref={voice.videoElement} className="stage-film absolute inset-0" />
             <div className="stage-vignette pointer-events-none absolute inset-0" aria-hidden />
-            <div className="pointer-events-none absolute inset-x-0 bottom-0 h-1/3 bg-gradient-to-t from-obsidian/90 to-transparent" aria-hidden />
+            <div className="pointer-events-none absolute inset-x-0 bottom-0 h-1/2 bg-gradient-to-t from-obsidian/85 via-obsidian/30 via-45% to-transparent" aria-hidden />
             <span className="pointer-events-none absolute inset-1.5 border border-gold/20" aria-hidden />
             <span className="pointer-events-none absolute left-3 top-3 size-4 border-l border-t border-gold/70" aria-hidden />
             <span className="pointer-events-none absolute right-3 top-3 size-4 border-r border-t border-gold/70" aria-hidden />
             <span className="pointer-events-none absolute bottom-3 left-3 size-4 border-b border-l border-gold/70" aria-hidden />
             <span className="pointer-events-none absolute bottom-3 right-3 size-4 border-b border-r border-gold/70" aria-hidden />
-            <div className="pointer-events-none absolute left-8 top-7 inline-flex items-center gap-2 bg-obsidian/75 px-2.5 py-1.5" aria-hidden>
+            <div className="pointer-events-none absolute left-8 top-7 inline-flex items-center gap-2 border border-gold/30 bg-obsidian/55 px-2.5 py-1.5 backdrop-blur-sm" aria-hidden>
               <StatusDot tone={line.tone} pulse={line.pulse} />
               <span className="label-mono text-ivory/85">{line.label}{live && voice.muted ? ' · Muted' : ''}</span>
             </div>
-            {live && <figcaption className="pointer-events-none absolute inset-x-5 bottom-5">
-              <p className="truncate font-display text-2xl leading-none text-ivory xl:text-3xl">{view.briefing.publicSuspect.name}</p>
-              <p className="label-mono mt-1.5 text-gold/80">{view.briefing.publicSuspect.role}</p>
+            {live && <figcaption className="pointer-events-none absolute inset-x-8 bottom-6 drop-shadow-[0_1px_3px_rgba(0,0,0,0.9)] lg:bottom-7">
+              <span className="mb-2 block h-px w-10 bg-gold/70 lg:mb-2.5" aria-hidden />
+              <p className="truncate font-display text-xl leading-none text-ivory sm:text-2xl xl:text-3xl">{view.briefing.publicSuspect.name}</p>
+              <p className="label-mono mt-1.5 line-clamp-2 text-gold/90 lg:mt-2">{view.briefing.publicSuspect.role}</p>
             </figcaption>}
             {!live && <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center bg-obsidian/70 p-6 text-center">
               <p className="font-display text-3xl">{view.briefing.publicSuspect.name}</p>
