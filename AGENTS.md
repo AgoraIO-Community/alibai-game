@@ -114,8 +114,8 @@ Session states: `created → preparing → active → ended → scored`, or `aba
 
 1. `POST /api/sessions` runs `assign_scenario`. That picks an unplayed case and freezes one avatar and one voice on the session.
 2. The player reads the briefing and enters the room, which connects automatically.
-3. `POST .../connect` is the room's first call. `session_connect` checks the owner, reads the session and claims the run in one call. The route returns the view and RTC credentials at once, then starts the agent in `after()` and commits it. It also renews tokens and reconnects, and only the call that wins the claim starts an agent.
-4. The browser joins and publishes the mic straight away, without waiting for Agora. Once suspect audio **and** video decode, the suspect shows and `POST .../ready` starts the clock through `session_ready` and returns the view. A start acknowledgement alone never starts it. A background failure abandons the session, and the browser sees that through polling, Realtime or `ready`.
+3. `POST .../connect` is the room's first call. `session_connect` checks the owner, reads the session and claims the run in one call. The route then awaits Agora's start, commits the agent ID and returns the view and RTC credentials. It also renews tokens and reconnects, and only the call that wins the claim starts an agent.
+4. The browser joins and publishes the mic once `connect` returns. Once suspect audio **and** video decode, the suspect shows and `POST .../ready` starts the clock through `session_ready` and returns the view. A start acknowledgement alone never starts it.
 5. Every 5 seconds, `sync-facts` reads provider history on the server and records verified facts, which unlock evidence and follow-up questions.
 6. `POST .../end` runs a final sync, ends the session, and stops the agent.
 7. `POST .../verdict` accepts one verdict. SQL calculates the score.
@@ -177,7 +177,6 @@ No one has confirmed these working end to end: a live Agora and Anam session, a 
 - Agent `idleTimeout` is 30 seconds, so reconnecting after a long drop may fail.
 - Calling `connect` on a session started through the dev-only `/start` path resets its clock.
 - Access tokens are verified locally, so a token revoked by logout or a ban works until it expires (one hour). Refresh tokens are still checked by Supabase.
-- The agent start in `after()` isn't durable. If the function dies mid-start, the browser's 60-second deadline ends the session, and the agent's idle timeout and 5-minute expiry bound the cost.
 - There's no recording notice yet, detective turns aren't stored, and `/admin` is a placeholder.
 - The landing page shows a hard-coded case number.
 - `docs/setup.md` and `docs/verification.md` predate Google sign-in and the latest migrations.

@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { IAgoraRTCClient, IMicrophoneAudioTrack, IRemoteAudioTrack, IRemoteVideoTrack } from 'agora-rtc-sdk-ng'
-import { GameRequestError, sessionRequest, type SessionView } from '@/lib/game/api'
+import { sessionRequest, type SessionView } from '@/lib/game/api'
 import { connectLiveTranscript, type LiveTranscript, type TranscriptLine, type TranscriptStatus } from '@/lib/agora/live-transcript'
 import { startupMarks } from '@/lib/agora/startup-marks'
 
@@ -17,11 +17,6 @@ type Phase = 'idle' | 'connecting' | 'waiting_media' | 'starting_clock' | 'live'
  * Live captions are display only. No transcript or fact leaves the browser: discovery remains
  * a trusted server responsibility, and captions take no part in the readiness gate.
  */
-const MEDIA_TIMEOUT_MS = 60000, READY_RETRY_MS = 500, FAILURE_POLL_MS = 3000
-const START_FAILED = 'The suspect could not be reached. Your clock never started. Please request another case.'
-const MEDIA_TIMED_OUT = 'The suspect’s audio and avatar did not connect in time. Your clock never started. Please request another case.'
-const CLOCK_TIMED_OUT = 'The suspect connected, but the interview clock could not start in time. Please request another case.'
-const hasCode = (error: unknown, code: string) => error instanceof GameRequestError && error.code === code
 export function useSuspectVoice(sessionId: string, onView: (view: SessionView) => void, onRefresh: () => Promise<void>) {
   const [phase, setPhase] = useState<Phase>('idle')
   const [error, setError] = useState('')
@@ -43,17 +38,11 @@ export function useSuspectVoice(sessionId: string, onView: (view: SessionView) =
   const viewCallback = useRef(onView)
   const refreshCallback = useRef(onRefresh)
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const failureWatch = useRef<ReturnType<typeof setInterval> | null>(null)
   viewCallback.current = onView
   refreshCallback.current = onRefresh
 
-  const clearStartTimers = useCallback(() => {
-    if (timeoutRef.current) { clearTimeout(timeoutRef.current); timeoutRef.current = null }
-    if (failureWatch.current) { clearInterval(failureWatch.current); failureWatch.current = null }
-  }, [])
-
   const releaseMedia = useCallback(async () => {
-    clearStartTimers()
+    if (timeoutRef.current) { clearTimeout(timeoutRef.current); timeoutRef.current = null }
     const microphone = microphoneRef.current; microphoneRef.current = null
     const client = clientRef.current; clientRef.current = null
     const liveTranscript = transcriptRef.current; transcriptRef.current = null
@@ -65,7 +54,7 @@ export function useSuspectVoice(sessionId: string, onView: (view: SessionView) =
     if (microphone) { microphone.stop(); microphone.close() }
     if (client) { client.removeAllListeners(); await client.leave().catch(() => {}) }
     await transcriptReleased
-  }, [clearStartTimers])
+  }, [])
 
   const disconnect = useCallback(async () => {
     ++attempt.current; starting.current = false; active.current = false
@@ -96,74 +85,40 @@ export function useSuspectVoice(sessionId: string, onView: (view: SessionView) =
       if (!isCurrent()) { microphone.stop(); microphone.close(); return }
       microphoneRef.current = microphone
       marks.mark('mic')
-      // Set before the request: leaving while it is in flight must still end the session.
-      hasAgent.current = true
+      // Resolves once the agent exists. Without credentials the session is past connecting, so no agent needs ending.
       const { view, connection: credentials } = await sessionRequest<ConnectResponse>(sessionId, 'connect', {}).catch(error => { agentFailed = true; throw error })
-      agentRequested = true
-      marks.mark('connect-response'); marks.anchor(view.serverTime)
-      if (!isCurrent()) { await releaseMedia(); void endSession().catch(()=>{}); return }
+      if (credentials) { agentRequested = true; hasAgent.current = true }
+      marks.mark('connect-response')
+      if (!isCurrent()) { await releaseMedia(); if (credentials) void endSession().catch(()=>{}); return }
       viewCallback.current(view)
-      if (!credentials) {
-        // The server confirmed there is nothing to join, so the unmount has nothing to end.
-        hasAgent.current = false; starting.current = false
-        await releaseMedia()
-        if (['created','preparing','active'].includes(view.session.state)) { marks.report('failed'); setError(START_FAILED); setPhase('error') } else setPhase('ended')
-        return
-      }
+      if (!credentials) { starting.current = false; await releaseMedia(); setPhase('ended'); return }
       const client = AgoraRTC.createClient({ mode:'rtc', codec:'h264' })
       clientRef.current = client
       let audioDecoded = false, videoDecoded = false, published = false, ready = false, readyInFlight = false
       let failedAutoplay = false
-      // hasAgent stays set unless the end is confirmed, so a failed end still retries on unmount.
-      const giveUp = (message: string, end: boolean) => {
-        marks.report('failed')
-        setError(message); setPhase('error'); starting.current = false; ++attempt.current
-        void releaseMedia()
-        void (end ? endSession() : Promise.resolve()).then(() => refreshCallback.current()).catch(()=>{})
-      }
-      // The agent starts on the server while this runs, so the deadline covers the whole start.
-      timeoutRef.current = setTimeout(() => {
-        if(isCurrent() && !ready) giveUp(readyInFlight ? CLOCK_TIMED_OUT : MEDIA_TIMED_OUT, true)
-      }, MEDIA_TIMEOUT_MS)
-      // A failed background start abandons the session. Polling carries that even without Realtime.
-      failureWatch.current = setInterval(() => {
-        void sessionRequest<SessionView>(sessionId,'read').then(latest => {
-          if(isCurrent() && !ready && latest.session.state === 'abandoned') giveUp(START_FAILED, false)
-        }).catch(()=>{})
-      }, FAILURE_POLL_MS)
       const markReady = async () => {
         if (!isCurrent() || ready || readyInFlight || !published || !audioDecoded || !videoDecoded || failedAutoplay) return
         readyInFlight = true
         // Media is playing, so the suspect shows now. Only the server's reply starts the clock.
         setPhase('starting_clock')
         try {
-          // Media can beat the agent's commit. The media deadline bounds these retries.
-          let view: SessionView | null = null, retries = 0
           marks.mark('ready-request')
-          while (!view) {
-            try { view = await sessionRequest<SessionView>(sessionId, 'ready', {}) }
-            catch (error) {
-              if (!hasCode(error, 'AGENT_START_PENDING')) throw error
-              marks.mark('ready-pending'); marks.note('ready-retries', ++retries)
-              await new Promise(resolve => setTimeout(resolve, READY_RETRY_MS))
-              if (!isCurrent()) return
-            }
-          }
+          const liveView = await sessionRequest<SessionView>(sessionId, 'ready', {})
           if (!isCurrent()) return
           ready = true; active.current = true; starting.current = false
-          clearStartTimers()
+          if(timeoutRef.current) { clearTimeout(timeoutRef.current); timeoutRef.current = null }
           marks.mark('ready'); marks.report('ready')
-          setPhase('live'); viewCallback.current(view)
-        } catch (error) {
-          if(!isCurrent()) return
-          if(hasCode(error, 'AGENT_START_FAILED')) { giveUp(START_FAILED, false); return }
-          // Leave nothing playing behind the error. The agent stays up for a retry, and
-          // the refresh shows the true state if the server did start the clock.
-          marks.report('failed')
-          ++attempt.current; starting.current = false; active.current = false
-          setError('The suspect connected, but the server could not confirm the interview clock. Please retry the connection.'); setPhase('error')
-          await releaseMedia()
-          await refreshCallback.current().catch(() => {})
+          setPhase('live'); viewCallback.current(liveView)
+        } catch {
+          if(isCurrent()) {
+            // Leave nothing playing behind the error. The agent stays up for a retry, and
+            // the refresh shows the true state if the server did start the clock.
+            marks.report('failed')
+            ++attempt.current; starting.current = false; active.current = false
+            setError('The suspect connected, but the server could not confirm the interview clock. Please retry the connection.'); setPhase('error')
+            await releaseMedia()
+            await refreshCallback.current().catch(() => {})
+          }
         } finally { readyInFlight = false }
       }
       AgoraRTC.onAudioAutoplayFailed = () => { if(isCurrent()) { failedAutoplay = true; setAudioBlocked(true) } }
@@ -220,6 +175,10 @@ export function useSuspectVoice(sessionId: string, onView: (view: SessionView) =
       await client.publish(microphone)
       marks.mark('mic-published')
       published = true; setPhase('waiting_media'); void markReady()
+      // Decode is the readiness gate. The player gets an explicit retry if no media arrives.
+      timeoutRef.current = setTimeout(() => {
+        if(isCurrent() && !ready) { setError('The suspect’s audio and avatar did not connect in time. Your clock never started. Please request another case.'); setPhase('error'); starting.current = false; ++attempt.current; void releaseMedia(); void endSession().then(() => refreshCallback.current()).catch(()=>{}) }
+      }, 60000)
       // Replay from a fresh user gesture can release browser autoplay restrictions.
       resumeRef.current = () => { audioRef.current?.play(); failedAutoplay = false; setAudioBlocked(false); void markReady() }
     } catch (error) {
@@ -235,7 +194,7 @@ export function useSuspectVoice(sessionId: string, onView: (view: SessionView) =
         await refreshCallback.current().catch(()=>{})
       }
     }
-  }, [sessionId, releaseMedia, clearStartTimers, endSession])
+  }, [sessionId, releaseMedia, endSession])
 
   const resumeRef = useRef<() => void>(() => {})
   const resumeAudio = useCallback(() => resumeRef.current(), [])

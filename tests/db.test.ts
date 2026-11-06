@@ -169,7 +169,7 @@ test('local Supabase: connect, ready and start races', { skip: !enabled, timeout
   refused(await request('/rest/v1/rpc/session_ready', { ...args(g), p_agent: null }, g.token), 'permission denied');
   refused(await request('/rest/v1/rpc/session_connect', args(g), anon!), 'permission denied');
  });
- await t.test('double clicks and retries claim exactly once, and renewal mid-start still succeeds', async () => {
+ await t.test('double clicks and retries claim exactly once, and a renewal after commit sees the run', async () => {
   const g = await open();
   const results = await Promise.all(Array.from({ length: 8 }, () => connect(g)));
   assert.equal(results.filter(r => r.claim.claimed).length, 1);
@@ -179,9 +179,9 @@ test('local Supabase: connect, ready and start races', { skip: !enabled, timeout
   const renewed = await connect(g);
   assert.equal(renewed.claim.state, 'running'); assert.equal(renewed.claim.claimed, false);
  });
- await t.test('ready before commit is pending and leaves the clock alone, then starts it once', async () => {
+ await t.test('ready needs the committed agent, then starts the clock once', async () => {
   const g = await open(); await connect(g);
-  refused(await ready(g, null), 'AGENT_START_PENDING');
+  refused(await ready(g, null), 'AGENT_NOT_READY');
   assert.equal((await session(g)).started_at, null); assert.equal((await session(g)).state, 'preparing');
   assert.ok((await life(g, 'commit', 'agent-ready-1')).ok);
   refused(await ready(g, 'agent-forged'), 'AGENT_NOT_READY');
@@ -191,21 +191,11 @@ test('local Supabase: connect, ready and start races', { skip: !enabled, timeout
   const again = await ready(g, 'agent-ready-1');
   assert.equal(again.data.session.started_at, started.data.session.started_at, 'a reconnect never moves the clock');
  });
- await t.test('ready racing commit either waits or starts, and never fails the player', async () => {
-  for (let i = 0; i < 6; i++) {
-   const g = await open(), agent = `agent-race-${randomUUID()}`; await connect(g);
-   const [early, commit] = await Promise.all([ready(g, null), life(g, 'commit', agent)]);
-   assert.ok(commit.ok);
-   if (!early.ok) assert.match(early.data.message, /AGENT_START_PENDING|AGENT_NOT_READY/);
-   assert.equal((await session(g)).started_at, null, 'the unchecked call never starts the clock');
-   assert.ok((await ready(g, agent)).ok);
-  }
- });
  await t.test('the run lookup in readyVoice only finds the owner\'s run', async () => {
   const g = await open(), stranger = await player(); await connect(g);
-  const lookup = (playerId: string) => request(`/rest/v1/agent_runs?session_id=eq.${g.sid}&game_sessions.player_id=eq.${playerId}&select=agent_id,state,game_sessions!inner(player_id)`, undefined, service!, 'GET');
+  const lookup = (playerId: string) => request(`/rest/v1/agent_runs?session_id=eq.${g.sid}&game_sessions.player_id=eq.${playerId}&select=agent_id,game_sessions!inner(player_id)`, undefined, service!, 'GET');
   const own = await lookup(g.id); assert.ok(own.ok, JSON.stringify(own.data));
-  assert.equal(own.data.length, 1); assert.equal(own.data[0].state, 'starting');
+  assert.equal(own.data.length, 1); assert.equal(own.data[0].agent_id, null);
   assert.deepEqual((await lookup(stranger.id)).data, []);
  });
  await t.test('no session and no run: ready refuses', async () => {
@@ -214,11 +204,11 @@ test('local Supabase: connect, ready and start races', { skip: !enabled, timeout
   const other = await player();
   refused(await request('/rest/v1/rpc/session_ready', { p_player: other.id, p_session: g.sid, p_agent: null }), 'SESSION_NOT_FOUND');
  });
- await t.test('a failed background start abandons the session, is visible and is never retried', async () => {
+ await t.test('a failed start abandons the session, is visible and is never retried', async () => {
   const g = await open(); await connect(g);
   assert.ok((await life(g, 'failed')).ok);
   assert.equal((await session(g)).state, 'abandoned');
-  refused(await ready(g, null), 'AGENT_START_FAILED');
+  refused(await ready(g, null), 'AGENT_NOT_READY');
   const after = await connect(g);
   assert.equal(after.claim, null); assert.equal(after.snapshot.session.state, 'abandoned');
   assert.equal((await run(g)).state, 'failed'); assert.equal((await session(g)).started_at, null);
@@ -230,7 +220,7 @@ test('local Supabase: connect, ready and start races', { skip: !enabled, timeout
   refused(await life(g, 'commit', 'agent-late'), 'AGENT_STATE_CONFLICT');
   assert.ok((await life(g, 'failed')).ok);
   assert.deepEqual(await run(g), { agent_id: null, state: 'failed' });
-  refused(await ready(g, 'agent-late'), 'AGENT_START_FAILED');
+  refused(await ready(g, 'agent-late'), 'AGENT_NOT_READY');
   assert.equal((await session(g)).state, 'abandoned'); assert.equal((await session(g)).started_at, null);
  });
  await t.test('end racing commit always leaves one side able to stop the agent', async () => {

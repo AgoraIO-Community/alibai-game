@@ -6,11 +6,9 @@ import './only';
  */
 export interface StepTimer {
   step<T>(name: string, work: () => Promise<T>): Promise<T>;
-  /** Adds a number that isn't a duration, such as a time to match against the browser's marks. */
-  note(name: string, value: number): void;
   done(): void;
 }
-export const noTimer: StepTimer = { step: (_name, work) => work(), note() {}, done() {} };
+export const noTimer: StepTimer = { step: (_name, work) => work(), done() {} };
 
 export function stepTimer(label: string, log: (line: string) => void = console.info): StepTimer {
   const began = performance.now();
@@ -23,7 +21,6 @@ export function stepTimer(label: string, log: (line: string) => void = console.i
       catch (error) { failed = true; throw error; }
       finally { steps[name] = Math.round(performance.now() - at); }
     },
-    note(name, value) { steps[name] = value; },
     done() { log(`[timing] ${label} ${JSON.stringify({ ...steps, total: Math.round(performance.now() - began), ok: !failed })}`); },
   };
 }

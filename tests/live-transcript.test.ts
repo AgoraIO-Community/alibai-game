@@ -182,7 +182,7 @@ test('captions stay display only and outside the media readiness gate', async ()
   const [helper, hook, session, route] = await Promise.all(['lib/agora/live-transcript.ts', 'lib/agora/use-suspect-voice.ts', 'components/game/production-session.tsx', 'app/api/sessions/[id]/[action]/route.ts'].map(path => readFile(path, 'utf8')));
   assert.doesNotMatch(helper, /sessionRequest|gameRequest|\bfetch\(|lib\/game\/api/);
   // The hook's only server actions remain the media lifecycle, none carrying a transcript.
-  assert.deepEqual([...new Set([...hook.matchAll(/sessionRequest(?:<\w+>)?\(sessionId,\s*'([^']+)'/g)].map(match => match[1]))].sort(), ['connect', 'end', 'read', 'ready']);
+  assert.deepEqual([...new Set([...hook.matchAll(/sessionRequest(?:<\w+>)?\(sessionId,\s*'([^']+)'/g)].map(match => match[1]))].sort(), ['connect', 'end', 'ready']);
   assert.doesNotMatch(hook, /sessionRequest(?:<\w+>)?\(sessionId,\s*'[^']+',\s*(?:[^\s{]|\{[^}])/);
   assert.match(hook, /!published \|\| !audioDecoded \|\| !videoDecoded \|\| failedAutoplay/);
   assert.doesNotMatch(hook, /await connectLiveTranscript/);
@@ -200,24 +200,9 @@ test('the suspect shows at decode, the server starts the clock, and a failed sta
   assert.match(failure, /await releaseMedia\(\)/);
   assert.match(failure, /\+\+attempt\.current/);
 });
-test('starting_clock holds through ready retries, and the deadline still ends it cleanly', async () => {
-  const hook = await readFile('lib/agora/use-suspect-voice.ts', 'utf8');
-  const waiting = hook.slice(hook.indexOf("setPhase('starting_clock')") + 1, hook.indexOf("setPhase('live'); viewCallback"));
-  assert.match(waiting, /AGENT_START_PENDING/);
-  assert.doesNotMatch(waiting, /setPhase\(/, 'nothing changes the phase while ready retries');
-  assert.match(hook, /if\(isCurrent\(\) && !ready\) giveUp\(readyInFlight \? CLOCK_TIMED_OUT : MEDIA_TIMED_OUT, true\)/);
-  // The deadline moves the attempt on, which is what ends the retry loop.
-  const giveUp = hook.slice(hook.indexOf('const giveUp ='), hook.indexOf('The agent starts on the server'));
-  assert.match(giveUp, /\+\+attempt\.current/); assert.match(giveUp, /setPhase\('error'\)/); assert.match(giveUp, /endSession\(\)/);
-  assert.match(waiting, /READY_RETRY_MS\)\)\n\s+if \(!isCurrent\(\)\) return/);
-  assert.ok(hook.indexOf('timeoutRef.current = setTimeout') < hook.indexOf('client.join('), 'armed before the join');
-  assert.ok(hook.indexOf("<ConnectResponse>(sessionId, 'connect'") < hook.indexOf('timeoutRef.current = setTimeout'), 'armed once connect returns');
-});
-test('only a confirmed end, or a server with nothing to join, stops the unmount cleanup', async () => {
+test('only a confirmed end stops the unmount cleanup from sending another', async () => {
   const [hook, session] = await Promise.all(['lib/agora/use-suspect-voice.ts', 'components/game/production-session.tsx'].map(path => readFile(path, 'utf8')));
-  assert.equal(hook.match(/hasAgent\.current = false/g)?.length, 2);
-  assert.match(hook, /if \(!credentials\) \{\n.*\n\s+hasAgent\.current = false; starting\.current = false/);
-  assert.doesNotMatch(hook.slice(hook.indexOf('const giveUp ='), hook.indexOf('The agent starts on the server')), /hasAgent/);
+  assert.equal(hook.match(/hasAgent\.current = false/g)?.length, 1);
   assert.match(hook, /const view = await sessionRequest<SessionView>\(sessionId, 'end', \{\}\)\n\s+hasAgent\.current = false/);
   assert.match(hook, /if\(hasAgent\.current\) void fetch\(/);
   assert.equal(hook.match(/sessionRequest(?:<\w+>)?\(sessionId,\s*'end'/g)?.length, 1);
@@ -230,9 +215,7 @@ test('startup marks keep the agent start, remote join, publish and decode apart'
   const [hook, voice] = await Promise.all(['lib/agora/use-suspect-voice.ts', 'lib/server/voice.ts'].map(path => readFile(path, 'utf8')));
   assert.match(voice, /timer\.step\('agora-start',\(\)=>startSuspectAgent/);
   assert.match(hook, /client\.on\('user-joined'[\s\S]{0,160}-joined`\)/);
-  for (const mark of ['connect-response', 'player-joined', 'mic-published', 'ready-request', 'ready-pending', 'ready']) assert.ok(hook.includes(`marks.mark('${mark}')`), mark);
+  for (const mark of ['connect-response', 'player-joined', 'mic-published', 'ready-request', 'ready']) assert.ok(hook.includes(`marks.mark('${mark}')`), mark);
   for (const mark of ['-published-${mediaType}', '-decoded-audio', '-decoded-video']) assert.ok(hook.includes(mark), mark);
-  // The agent's join delay needs both logs on one clock.
-  assert.match(voice, /timer\.note\('agoraReturnedAt',Date\.now\(\)\)/); assert.match(hook, /marks\.anchor\(view\.serverTime\)/);
   assert.ok(hook.indexOf("marks.mark('mic')") < hook.indexOf("marks.mark('connect-response')"));
 });

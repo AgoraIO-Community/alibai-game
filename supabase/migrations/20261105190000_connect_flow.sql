@@ -17,18 +17,15 @@ end $$;
 revoke all on function public.session_connect(uuid,uuid) from public,anon,authenticated;
 grant execute on function public.session_connect(uuid,uuid) to service_role;
 
--- Starts the clock for the run the caller checked, then returns the view. Media can arrive
--- before the agent is committed, so an uncommitted run is "pending", not an error, and a
--- run that isn't real never starts the clock. Calling it again never moves started_at.
+-- Starts the clock for the run the caller checked, then returns the view. A run that isn't
+-- the one checked never starts the clock. Calling it again never moves started_at.
 create function public.session_ready(p_player uuid,p_session uuid,p_agent text) returns jsonb
 language plpgsql set search_path='' as $$
 declare g public.game_sessions; a public.agent_runs; begin
  select * into g from public.game_sessions where id=p_session and player_id=p_player for update;
  if not found then raise exception 'SESSION_NOT_FOUND'; end if;
  select * into a from public.agent_runs where session_id=g.id;
- if g.state='abandoned' or a.state='failed' then raise exception 'AGENT_START_FAILED'; end if;
- if a.state='starting' then raise exception 'AGENT_START_PENDING'; end if;
- if a.agent_id is distinct from p_agent then raise exception 'AGENT_NOT_READY'; end if;
+ if a.agent_id is null or a.agent_id is distinct from p_agent then raise exception 'AGENT_NOT_READY'; end if;
  perform public.agent_lifecycle(p_player,p_session,'ready');
  return public.session_action(p_player,p_session,'read');
 end $$;

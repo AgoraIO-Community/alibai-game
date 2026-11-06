@@ -32,9 +32,7 @@ class AvatarMiniMaxTTS extends MiniMaxTTS {
     return { ...value, params: { ...value.params, audio_setting: { sample_rate: 24000 } } };
   }
 }
-// The SDK default is 60 seconds and 2 retries. These limits keep a start, commit and cleanup inside
-// the route's maxDuration: the browser gives up at 60 seconds, so a longer start is no use anyway.
-function client() { return new AgoraClient({ ...config(), area: Area.US, timeoutInSeconds: 30, maxRetries: 1 }); }
+function client() { return new AgoraClient({ ...config(), area: Area.US }); }
 export function channelForSession(sessionId: string): string {
   return `case-${sessionIdSchema.parse(sessionId)}`;
 }
@@ -61,9 +59,9 @@ export function createPlayerRtcCredentials(sessionId: string) {
 
 /**
  * Call only after an owner-checked, database-serialized start reservation. Never
- * accept instructions, avatar ID, channel or UID from the browser. This runs after the
- * browser already has its tokens, so persist the returned agentId or stop the agent. A
- * start acknowledgment does not prove media readiness and must not start the game clock.
+ * accept instructions, avatar ID, channel or UID from the browser. Persist the returned
+ * agentId before returning connection credentials. A start acknowledgment does
+ * not prove media readiness and must not start the three-minute game clock.
  */
 export async function startSuspectAgent(input: { sessionId: string; instructions: string; avatarId: string; voiceId: string }) {
   const sessionId = sessionIdSchema.parse(input.sessionId);
@@ -89,9 +87,7 @@ export async function startSuspectAgent(input: { sessionId: string; instructions
     .withStt(new AresSTT())
     .withLlm(new OpenAI({ model: 'gpt-4o-mini',
       systemMessages: [{ role: 'system', content: instructions }], maxHistory: 30,
-      params: { max_tokens: 250, temperature: 0.2 }, greetingMessage: "I'm ready when you are.",
-      // The player is normally in the channel first. Once only, so a reconnect can't replay it.
-      greetingConfigs: { mode: 'single_first' } }))
+      params: { max_tokens: 250, temperature: 0.2 }, greetingMessage: "I'm ready when you are." }))
     .withTts(new AvatarMiniMaxTTS({ model: 'speech_2_6_turbo',
       voiceId }))
     .withAvatar(new AnamAvatar({ apiKey: requireEnv('ANAM_API_KEY'), avatarId,
