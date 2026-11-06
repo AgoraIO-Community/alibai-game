@@ -178,6 +178,17 @@ test('the route has no background work, and the old routes are gone', async () =
   assert.ok(hook.indexOf("<ConnectResponse>(sessionId, 'connect'") < hook.indexOf('hasAgent.current = true'));
   assert.ok(hook.indexOf("<ConnectResponse>(sessionId, 'connect'") < hook.indexOf('client.join('));
 });
+test('the room shows the case from read, and connects only once that view allows it', async () => {
+  const session = await readFile('components/game/production-session.tsx', 'utf8');
+  assert.match(session, /useEffect\(\(\) => \{ void refresh\(\) \}, \[refresh\]\)/);
+  const gate = session.slice(session.indexOf('const state = view?.session.state'), session.indexOf('void voice.start()'));
+  assert.match(gate, /secondsLeft\(\{ startedAt: started, endedAt: ended, clockOffset \}, Date\.now\(\)\) <= 0\) return/);
+  assert.match(gate, /if\(!state \|\| !\['created','preparing','active'\]\.includes\(state\)\) return/);
+  // Deferred after the gate, so React's development double mount can't cancel the only attempt.
+  assert.match(gate, /window\.setTimeout\(\(\) => \{ autoConnected\.current = true; $/);
+  assert.match(session, /void voice\.start\(\) \}, 0\)\n\s+return \(\) => window\.clearTimeout\(timer\)/);
+  assert.match(session, /current\?\.session\.started_at && !data\.session\.started_at \? current : data/);
+});
 test('the migration is additive and service-role only', async () => {
   const sql = await readFile('supabase/migrations/20261105190000_connect_flow.sql', 'utf8');
   assert.doesNotMatch(sql, /\b(drop|alter|create or replace)\b/i);

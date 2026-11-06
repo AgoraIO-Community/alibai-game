@@ -10,7 +10,7 @@ import { DecoRule, Eyebrow } from './deco'
 import { InterviewScreen } from './interview-screen'
 import { SessionClock } from './session-clock'
 import { useSuspectVoice } from '@/lib/agora/use-suspect-voice'
-import { startCountdown } from '@/lib/game/clock'
+import { secondsLeft, startCountdown } from '@/lib/game/clock'
 
 const buttonClass = 'min-h-12 rounded-none bg-gold px-6 font-mono text-xs uppercase tracking-widest text-obsidian hover:bg-ivory'
 
@@ -70,8 +70,7 @@ export function ProductionSession({ sessionId, mode }: { sessionId: string; mode
     return () => { stopped = true; window.clearInterval(timer) }
   }, [mode,view?.session.state,voice.phase,sessionId,applyView])
 
-  // The room's first view comes from connect.
-  useEffect(() => { if(mode !== 'interview') void refresh() }, [mode, refresh])
+  useEffect(() => { void refresh() }, [refresh])
   // Caches the SDK for the room. An import only: no client, no microphone, nothing billable.
   useEffect(() => { if(mode === 'briefing') void import('agora-rtc-sdk-ng').catch(() => {}) }, [mode])
   useEffect(() => {
@@ -126,13 +125,15 @@ export function ProductionSession({ sessionId, mode }: { sessionId: string; mode
       void voice.endSession().then(data => { applyView(data); setError('') }).catch(() => { autoEnded.current = false; setError('The interview has ended. Please retry filing your verdict.') })
     } })
   }, [mode, view?.session.state, started, clockOffset, applyView, voice.disconnect, voice.endSession])
-  // Entering the room connects straight away. Failures fall back to the retry button.
+  // Connects once the first read shows a session that can. Failures fall back to the retry button.
   useEffect(() => {
-    if(mode !== 'interview' || autoConnected.current || voice.phase !== 'idle') return
+    const state = view?.session.state
+    if(mode !== 'interview' || autoConnected.current || voice.phase !== 'idle' || secondsLeft({ startedAt: started, endedAt: ended, clockOffset }, Date.now()) <= 0) return
+    if(!state || !['created','preparing','active'].includes(state)) return
     // Deferred so React's development double mount can't cancel the only attempt.
     const timer = window.setTimeout(() => { autoConnected.current = true; void voice.start() }, 0)
     return () => window.clearTimeout(timer)
-  }, [mode, voice.phase, voice.start])
+  }, [mode, view?.session.state, voice.phase, voice.start, started, ended, clockOffset])
 
   // The room has its own one-viewport layout; the handlers stay here so the dossier pages share them.
   if (mode === 'interview') return <InterviewScreen view={view} error={error} busy={busy} timing={timing} voice={voice}

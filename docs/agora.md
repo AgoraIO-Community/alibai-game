@@ -92,7 +92,7 @@ The managed model receives only the immutable instructions for this session. A f
 - **One call for the database work:** `session_connect` checks the owner, reads the session and claims the run. `session_ready` starts the clock and returns the view.
 - **Failure:** `connect` stops any agent, records `failed`, which abandons the session, and returns the error.
 - **Repeat calls:** a running agent gets fresh tokens and any other run answers `AGENT_START_PENDING`. A session past connecting gets its view with `connection: null`.
-- **Room view:** the room's first view comes from `connect`, so it appears when Agora's start returns.
+- **Room view:** the room's first view comes from `read`, so the case shows without waiting on Agora. The room connects once that view shows a session that can connect, and `connect` then refreshes the view.
 
 ## Runtime status
 

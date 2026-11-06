@@ -190,8 +190,7 @@ export function useSuspectVoice(sessionId: string, onView: (view: SessionView) =
           : 'Could not connect the interview. Allow microphone access, check your connection, and retry. Your case is saved.')
         if(agentRequested) await endSession().catch(()=>{})
         // A failed start abandons the session on the server; show the player the way out.
-        // connect normally brings the view, so without it this is also the page's first read.
-        await refreshCallback.current().catch(()=>{})
+        if(agentRequested || agentFailed) await refreshCallback.current().catch(()=>{})
       }
     }
   }, [sessionId, releaseMedia, endSession])

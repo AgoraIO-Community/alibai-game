@@ -60,7 +60,7 @@ All session operations require the logged-in account. Auth is maintained in Http
 | `GET /api/sessions/:id/read` | Session state/timestamps, public briefing, current notebook, eligible suggestions; results only after scoring. |
 | `GET /api/sessions/:id/notebook` | Public evidence and genuinely discovered evidence. |
 | `GET /api/sessions/:id/questions?offset=0` | Up to three eligible prompts and `more` offset, or `null`. |
-| `POST /api/sessions/:id/connect` | The room's first call. Claims and starts the session's voice agent, then returns the view and safe connection credentials. Also renews tokens and reconnects. |
+| `POST /api/sessions/:id/connect` | Called once the room's view shows a session that can connect. Claims and starts the session's voice agent, then returns the view and safe connection credentials. Also renews tokens and reconnects. |
 | `POST /api/sessions/:id/ready` | Called after client media readiness; checks the associated agent, starts the clock and returns the view. |
 | `POST /api/sessions/:id/start` | Manual development start, enabled only by `ENABLE_MANUAL_INTERVIEW`. |
 | `POST /api/sessions/:id/end` | Freeze an active clock, or abandon a cancelled startup, then request agent cleanup. |

@@ -114,7 +114,7 @@ Session states: `created → preparing → active → ended → scored`, or `aba
 
 1. `POST /api/sessions` runs `assign_scenario`. That picks an unplayed case and freezes one avatar and one voice on the session.
 2. The player reads the briefing and enters the room, which connects automatically.
-3. `POST .../connect` is the room's first call. `session_connect` checks the owner, reads the session and claims the run in one call. The route then awaits Agora's start, commits the agent ID and returns the view and RTC credentials. It also renews tokens and reconnects, and only the call that wins the claim starts an agent.
+3. `GET .../read` loads the room, then `POST .../connect` runs if the session can connect. `session_connect` checks the owner, reads the session and claims the run in one call. The route then awaits Agora's start, commits the agent ID and returns the view and RTC credentials. It also renews tokens and reconnects, and only the call that wins the claim starts an agent.
 4. The browser joins and publishes the mic once `connect` returns. Once suspect audio **and** video decode, the suspect shows and `POST .../ready` starts the clock through `session_ready` and returns the view. A start acknowledgement alone never starts it.
 5. Every 5 seconds, `sync-facts` reads provider history on the server and records verified facts, which unlock evidence and follow-up questions.
 6. `POST .../end` runs a final sync, ends the session, and stops the agent.
