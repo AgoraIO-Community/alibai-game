@@ -29,7 +29,7 @@ Check facts about live systems before relying on them. Status notes here can go 
 | Case quality | `lib/scenarios/validate.ts`, `lib/scenarios/cases/`, `docs/writing-cases.md` | Timelines, access, clue reachability and answer keys are checked before publishing, and public text is checked for guilt tells across the whole set |
 | Fair assignment | `assign_scenario` in SQL | Atomic, idempotent, no repeats per player, with guilt never chosen at random at join time |
 
-**Data model:** mysteries are pre-generated into `scenarios`, `suspects`, `evidence` and `suggested_questions`, with hidden truth and undiscovered evidence in separate server-only tables. The starting inventory is eight hand-authored cases, four guilty and four innocent, plus a catalog of 14 Anam avatars. `players` and `game_sessions` track accounts and assignments, while `session_events`, `session_facts` and `session_clues` record validated discoveries. `verdicts` hold player input, and `scores` are calculated on the server for the leaderboard. There are 21 tables, all with RLS.
+**Data model:** mysteries are pre-generated into `scenarios`, `suspects`, `evidence` and `suggested_questions`, with hidden truth and undiscovered evidence in separate server-only tables. The starting inventory is eight hand-authored cases, four guilty and four innocent, plus a catalog of 14 Anam avatars. `players` and `game_sessions` track accounts and assignments, while `session_events` keeps every suspect reply seen by the server, and `session_facts` and `session_clues` record validated discoveries. `verdicts` hold player input, and `scores` are calculated on the server for the leaderboard. There are 21 tables, all with RLS.
 
 **Data quality:**
 
