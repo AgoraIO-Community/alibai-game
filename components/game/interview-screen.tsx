@@ -1,47 +1,59 @@
 'use client'
 
 import Link from 'next/link'
-import { useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Mic, MicOff } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import type { PublicQuestion, SessionView } from '@/lib/game/api'
+import type { SessionView } from '@/lib/game/api'
 import type { ClockTiming } from '@/lib/game/clock'
+import { visibleLeads } from '@/lib/game/lead-matching'
+import { useAskedLeads } from '@/lib/game/use-asked-leads'
 import type { useSuspectVoice } from '@/lib/agora/use-suspect-voice'
 import { cn } from '@/lib/utils'
 import { Eyebrow, StatusDot } from './deco'
 import { DetectiveNotebook } from './detective-notebook'
 import { InterviewClock } from './session-clock'
-import { SuggestedQuestions } from './suggested-questions'
 import { TapeRecorder } from './tape-recorder'
 
 export type SuspectVoice = ReturnType<typeof useSuspectVoice>
 
 const goldButton = 'min-h-12 rounded-none bg-gold px-5 font-mono text-xs uppercase tracking-widest text-obsidian hover:bg-ivory'
 const quietButton = 'min-h-12 rounded-none border border-gold/50 bg-transparent px-4 font-mono text-xs uppercase tracking-widest text-gold hover:bg-gold/10 hover:text-ivory'
+const NO_LEADS: SessionView['leads'] = []
 
 /**
- * The interrogation room: suspect stage in the centre, questions to the left, the tape recorder
- * (live transcript) over the notebook to the right on wide screens, tabs beneath a fixed-height
- * stage on phones. Everything fits one viewport; the panels scroll inside themselves. Handlers and
- * conditions belong to ProductionSession; this only lays them out.
+ * The interrogation room: the suspect stage takes the width, with the tape recorder (live
+ * transcript) over the one notebook on the right on wide screens, and two tabs beneath a
+ * fixed-height stage on phones. Everything fits one viewport; the panels scroll inside
+ * themselves. Handlers and conditions belong to ProductionSession; this lays them out and
+ * reads the captions for the notebook's "asked" marks, which never leave the browser.
  */
-export function InterviewScreen({ view, error, busy, timing, voice, questions, more, selectedQuestion, onSelectQuestion, onNextQuestions, onRefresh, onCancelConnection, onRetryConnection, onEndInterview }: {
+export function InterviewScreen({ view, error, busy, timing, voice, onRefresh, onCancelConnection, onRetryConnection, onEndInterview }: {
   view: SessionView | null
   error: string
   busy: boolean
   timing: ClockTiming
   voice: SuspectVoice
-  questions: PublicQuestion[]
-  more: number | null
-  selectedQuestion: string | null
-  onSelectQuestion: (id: string) => void
-  onNextQuestions: () => void
   onRefresh: () => void
   onCancelConnection: () => Promise<void>
   onRetryConnection: () => Promise<void>
   onEndInterview: () => Promise<void>
 }) {
-  const [panel, setPanel] = useState<'questions' | 'tape' | 'notebook'>('questions')
+  const [panel, setPanel] = useState<'notebook' | 'tape'>('notebook')
+  const [selectedLead, setSelectedLead] = useState<string | null>(null)
+  const leads = view?.leads ?? NO_LEADS
+  // The page is cut from the server's list; captions only ever add an "asked" mark to a lead on it.
+  const asked = useAskedLeads(voice.transcript, leads)
+  const page = useMemo(() => visibleLeads(leads, asked), [leads, asked])
+  // The phone tab lights up when the notebook changes while the tape is showing.
+  const entries = (view ? view.notebook.length + view.admissions.length : 0) + leads.filter(lead => lead.status === 'answered').length
+  const seenEntries = useRef(entries)
+  const [unseen, setUnseen] = useState(false)
+  useEffect(() => {
+    if (panel === 'notebook') { seenEntries.current = entries; setUnseen(false); return }
+    if (entries > seenEntries.current) setUnseen(true)
+  }, [entries, panel])
+
   const state = view?.session.state
   const live = ['live','starting_clock','reconnecting'].includes(voice.phase)
   const closed = state === 'ended' || state === 'scored'
@@ -65,9 +77,9 @@ export function InterviewScreen({ view, error, busy, timing, voice, questions, m
       </header>
       {error && <div role="alert" className="mt-3 shrink-0 border border-oxblood bg-oxblood/20 p-3 text-sm">{error}<button type="button" onClick={onRefresh} className="ml-3 underline">Retry</button></div>}
       {!view ? <p className="mt-12 label-mono">Opening case file…</p> : <>
-        <div className="mt-3 flex flex-1 flex-col gap-3 lg:grid lg:min-h-0 lg:grid-cols-[minmax(228px,3fr)_minmax(0,7fr)_minmax(248px,4fr)] lg:grid-rows-[minmax(0,1fr)] lg:gap-4">
-          {/* Phones: a 4:3 stage capped at 40dvh leaves room for three questions beneath. Wide screens: the grid row sets the height. */}
-          <section aria-label="Suspect interview" className="relative aspect-[4/3] max-h-[40dvh] w-full shrink-0 overflow-hidden border border-gold/40 bg-obsidian shadow-[0_0_80px_rgba(0,0,0,0.6)] lg:order-2 lg:aspect-auto lg:max-h-none lg:min-h-0">
+        <div className="mt-3 flex flex-1 flex-col gap-3 lg:grid lg:min-h-0 lg:grid-cols-[minmax(0,8fr)_minmax(300px,4fr)] lg:grid-rows-[minmax(0,1fr)] lg:gap-4">
+          {/* Phones: a 4:3 stage capped at 40dvh leaves room for the notebook beneath. Wide screens: the grid row sets the height. */}
+          <section aria-label="Suspect interview" className="relative aspect-[4/3] max-h-[40dvh] w-full shrink-0 overflow-hidden border border-gold/40 bg-obsidian shadow-[0_0_80px_rgba(0,0,0,0.6)] lg:aspect-auto lg:max-h-none lg:min-h-0">
             {/* The SDK inserts its own video element here, so the film and vignette sit on the container and an overlay. */}
             <div ref={voice.videoElement} className="stage-film absolute inset-0" />
             <div className="stage-vignette pointer-events-none absolute inset-0" aria-hidden />
@@ -91,19 +103,21 @@ export function InterviewScreen({ view, error, busy, timing, voice, questions, m
               <p className="mt-4 max-w-md text-sm text-ivory/60">{voice.phase === 'connecting' ? 'Opening a secure line…' : voice.phase === 'waiting_media' ? 'Waiting for the suspect’s audio and avatar…' : ['error','ended'].includes(voice.phase) ? 'The line is down.' : 'Opening a secure line…'}</p>
             </div>}
           </section>
-          {/* Three labels share 288px at 320 wide: columns follow label length ("Notebook · 12" needs about 120px in
-              label-mono) and the selected-tab diamond only appears from sm up. */}
-          <div role="tablist" aria-label="Interview panels" className="grid shrink-0 grid-cols-[5fr_3fr_6fr] border border-gold/25 bg-charcoal/40 lg:hidden">
-            {([['questions','Questions'],['tape','Tape'],['notebook',`Notebook · ${view.notebook.length}`]] as const).map(([key,label]) => <button key={key} type="button" role="tab" id={`tab-${key}`} aria-selected={panel === key} aria-controls={`interview-${key}`} onClick={() => setPanel(key)} className={cn('label-mono min-h-11 truncate px-1 transition-colors duration-150 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ivory', panel === key ? 'bg-gold text-obsidian' : 'text-ivory/70 hover:text-gold')}>{panel === key && <span className="hidden sm:inline" aria-hidden>◆ </span>}{label}</button>)}
+          {/* Two tabs on phones. The notebook carries a count and lights up when it changes while the tape is open. */}
+          <div role="tablist" aria-label="Interview panels" className="grid shrink-0 grid-cols-2 border border-gold/25 bg-charcoal/40 lg:hidden">
+            {([['notebook', `Notebook · ${entries}`], ['tape', 'Tape']] as const).map(([key, label]) => <button key={key} type="button" role="tab" id={`tab-${key}`} aria-selected={panel === key} aria-controls={`interview-${key}`} onClick={() => setPanel(key)} className={cn('label-mono relative min-h-11 truncate px-2 transition-colors duration-150 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ivory', panel === key ? 'bg-gold text-obsidian' : 'text-ivory/70 hover:text-gold')}>
+              {panel === key && <span aria-hidden>◆ </span>}{label}
+              {key === 'notebook' && unseen && <StatusDot tone="gold" pulse className="absolute right-3 top-1/2 -translate-y-1/2" />}
+              {key === 'notebook' && unseen && <span className="sr-only">, updated</span>}
+            </button>)}
           </div>
-          {/* Below lg the panel contributes only its 13rem floor to the column's minimum height (contain-size), so a
-              short viewport such as a landscape phone scrolls the room instead of crushing the panel, while a tall one never stretches. */}
-          <SuggestedQuestions id="interview-questions" questions={questions} more={more} selectedQuestion={selectedQuestion} onSelect={onSelectQuestion} onNext={onNextQuestions} className={cn('min-h-52 flex-1 contain-size lg:order-1 lg:min-h-0 lg:contain-none', panel === 'questions' ? 'flex' : 'hidden lg:flex')} />
           {/* Right column. On phones the wrapper contributes nothing (contents) and each panel is its own tab; on lg the
-              deck takes a fixed share of the column so the transcript stays near the top and the notebook fills the rest. */}
-          <div className="contents lg:order-3 lg:flex lg:min-h-0 lg:flex-col lg:gap-3">
-            <TapeRecorder id="interview-tape" lines={voice.transcript} status={voice.transcriptStatus} suspectName={view.briefing.publicSuspect.name} running={voice.phase === 'live'} closed={closed} timing={timing} className={cn('min-h-64 flex-1 contain-size lg:h-[clamp(17rem,46dvh,25rem)] lg:min-h-0 lg:flex-none lg:contain-none', panel === 'tape' ? 'flex' : 'hidden lg:flex')} />
-            <DetectiveNotebook id="interview-notebook" items={view.notebook} onRefresh={onRefresh} className={cn('min-h-52 flex-1 contain-size lg:min-h-0 lg:contain-none', panel === 'notebook' ? 'flex' : 'hidden lg:flex')} />
+              deck takes a fixed share of the column so the transcript stays near the top and the notebook fills the rest.
+              Below lg a panel contributes only its floor to the column's minimum height (contain-size), so a short viewport
+              such as a landscape phone scrolls the room instead of crushing the panel, while a tall one never stretches. */}
+          <div className="contents lg:flex lg:min-h-0 lg:flex-col lg:gap-3">
+            <TapeRecorder id="interview-tape" lines={voice.transcript} status={voice.transcriptStatus} suspectName={view.briefing.publicSuspect.name} running={voice.phase === 'live'} closed={closed} timing={timing} className={cn('min-h-64 flex-1 contain-size lg:h-[clamp(13rem,30dvh,19rem)] lg:min-h-0 lg:flex-none lg:contain-none', panel === 'tape' ? 'flex' : 'hidden lg:flex')} />
+            <DetectiveNotebook id="interview-notebook" leads={page} asked={asked} admissions={view.admissions} records={view.notebook} suspectName={view.briefing.publicSuspect.name} selectedLead={selectedLead} onSelectLead={id => setSelectedLead(current => current === id ? null : id)} onRefresh={onRefresh} className={cn('min-h-64 flex-1 contain-size lg:min-h-0 lg:contain-none', panel === 'notebook' ? 'flex' : 'hidden lg:flex')} />
           </div>
         </div>
         <footer className="mt-3 flex shrink-0 flex-col gap-2 border-t border-gold/20 pt-2.5 sm:flex-row sm:items-center sm:justify-between sm:gap-4">

@@ -56,3 +56,5 @@ export const publicEvidenceDTO = (e: Evidence) => ({ id:e.id, title:e.title, des
 export const publicSuspectDTO = (s: Scenario['suspect']) => ({ id:s.id, name:s.name, role:s.role, relationship:s.relationship, avatarDescription:s.avatarDescription });
 // Category stays private: which kinds of question a case carries can hint at its verdict.
 export const questionDTO = (q: Question) => ({ id:q.id, text:q.text });
+// Only for a fact the server has already recorded: the statement is what the suspect gave up aloud.
+export const factDTO = (f: Scenario['knowledge']['facts'][number]) => ({ id:f.id, statement:f.statement });

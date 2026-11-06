@@ -63,6 +63,7 @@
   --animate-reveal: reveal 0.6s cubic-bezier(0.2, 0.8, 0.2, 1) both;
   --animate-stamp: stamp 0.7s cubic-bezier(0.2, 1.2, 0.3, 1) both;
   --animate-reel-spin: reel-spin 2s linear infinite;
+  --animate-lead-flash: lead-flash 1.4s ease-out both;
 
   @keyframes pulse-ring {
     0% {
@@ -118,6 +119,17 @@
     100% {
       opacity: 1;
       transform: scale(1) rotate(-6deg);
+    }
+  }
+  /* A lead that has just been answered glows gold, then settles into the page. */
+  @keyframes lead-flash {
+    0% {
+      background-color: rgba(197, 164, 109, 0.42);
+      box-shadow: 0 0 24px rgba(197, 164, 109, 0.45);
+    }
+    100% {
+      background-color: rgba(197, 164, 109, 0.08);
+      box-shadow: 0 0 0 rgba(197, 164, 109, 0);
     }
   }
   @keyframes reel-spin {
