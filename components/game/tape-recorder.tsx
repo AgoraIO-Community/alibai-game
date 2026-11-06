@@ -2,7 +2,9 @@
 
 import { useEffect, useRef } from 'react'
 import type { TranscriptLine, TranscriptStatus } from '@/lib/agora/live-transcript'
+import type { ClockTiming } from '@/lib/game/clock'
 import { cn } from '@/lib/utils'
+import { useSecondsLeft } from './session-clock'
 
 const INTERVIEW_SECONDS = 180
 
@@ -45,7 +47,7 @@ function Reel({ cx, pack, running, duration }: { cx: number; pack: number; runni
  * while the line is live, the lamp follows the line, and tape winds from the supply reel to the
  * take-up reel as the three-minute clock runs down.
  */
-export function TapeRecorder({ lines, status, suspectName, running, closed, left, id, className }: {
+export function TapeRecorder({ lines, status, suspectName, running, closed, timing, id, className }: {
   lines: TranscriptLine[]
   status: TranscriptStatus
   suspectName: string
@@ -53,13 +55,14 @@ export function TapeRecorder({ lines, status, suspectName, running, closed, left
   running: boolean
   /** The interview is over. */
   closed: boolean
-  /** Seconds remaining out of 180. */
-  left: number
+  /** Drives the reels and counter; the deck re-renders on its own once a second. */
+  timing: ClockTiming
   id?: string
   className?: string
 }) {
   const log = useRef<HTMLDivElement | null>(null)
   useEffect(() => { if(log.current) log.current.scrollTop = log.current.scrollHeight }, [lines])
+  const left = useSecondsLeft(timing)
   const elapsed = Math.min(INTERVIEW_SECONDS, Math.max(0, INTERVIEW_SECONDS - left))
   const used = elapsed / INTERVIEW_SECONDS
   const supply = REEL.packMax - (REEL.packMax - REEL.packMin) * used

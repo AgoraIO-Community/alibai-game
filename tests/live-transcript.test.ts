@@ -189,3 +189,32 @@ test('captions stay display only and outside the media readiness gate', async ()
   assert.match(session, /sessionRequest<SessionView>\(sessionId,'sync-facts',\{\}\)/);
   assert.match(route, /if\(action==='sync-facts'\)return syncProviderFacts\(user\.id,id\)/);
 });
+test('the suspect shows at decode, the server starts the clock, and a failed start leaves nothing playing', async () => {
+  const [hook, screen] = await Promise.all(['lib/agora/use-suspect-voice.ts', 'components/game/interview-screen.tsx'].map(path => readFile(path, 'utf8')));
+  assert.match(screen, /const live = \['live','starting_clock','reconnecting'\]/);
+  // The overlay lifts only past the decode gate, and 'live' follows only a server reply.
+  const gate = hook.indexOf('!published || !audioDecoded'), overlay = hook.indexOf("setPhase('starting_clock')"), request = hook.indexOf("'agent-ready'"), live = hook.indexOf("setPhase('live'); await");
+  assert.ok(gate > 0 && gate < overlay && overlay < request && request < live);
+  const failure = hook.slice(live, hook.indexOf('finally { readyInFlight'));
+  assert.match(failure, /setPhase\('error'\)/);
+  assert.match(failure, /await releaseMedia\(\)/);
+  assert.match(failure, /\+\+attempt\.current/);
+});
+test('only a confirmed end stops the unmount cleanup from sending another', async () => {
+  const [hook, session] = await Promise.all(['lib/agora/use-suspect-voice.ts', 'components/game/production-session.tsx'].map(path => readFile(path, 'utf8')));
+  assert.equal(hook.match(/hasAgent\.current = false/g)?.length, 1);
+  assert.match(hook, /const view = await sessionRequest<SessionView>\(sessionId, 'end', \{\}\)\n\s+hasAgent\.current = false/);
+  assert.match(hook, /if\(hasAgent\.current\) void fetch\(/);
+  assert.equal(hook.match(/sessionRequest(?:<\w+>)?\(sessionId,\s*'end'/g)?.length, 1);
+  const disconnect = hook.slice(hook.indexOf('const disconnect ='), hook.indexOf('}, [releaseMedia])'));
+  assert.doesNotMatch(disconnect, /hasAgent/);
+  assert.match(session, /if\(actionName === 'end'\) applyView\(await voice\.endSession\(\)\)/);
+  assert.doesNotMatch(session, /sessionRequest(?:<\w+>)?\(sessionId,\s*'end'/);
+});
+test('startup marks keep the agent start, remote join, publish and decode apart', async () => {
+  const [hook, voice] = await Promise.all(['lib/agora/use-suspect-voice.ts', 'lib/server/voice.ts'].map(path => readFile(path, 'utf8')));
+  assert.match(voice, /timer\.step\('agora-start',\(\)=>startSuspectAgent/);
+  assert.match(hook, /client\.on\('user-joined'[\s\S]{0,160}-joined`\)/);
+  for (const mark of ['agent-response', 'player-joined', 'mic-published']) assert.ok(hook.includes(`marks.mark('${mark}')`), mark);
+  for (const mark of ['-published-${mediaType}', '-decoded-audio', '-decoded-video']) assert.ok(hook.includes(mark), mark);
+});
