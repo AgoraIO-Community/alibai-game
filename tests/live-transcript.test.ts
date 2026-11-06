@@ -5,7 +5,7 @@ import { inflateSync } from 'node:zlib';
 import { connectLiveTranscript, normalizeTranscriptSpacing, toTranscriptLines, type TranscriptLine, type TranscriptSdks, type TranscriptStatus } from '../lib/agora/live-transcript';
 
 type Item = Parameters<typeof toTranscriptLines>[0][number];
-const item = (uid: string, turn_id: number, text: string): Item => ({ uid, turn_id, stream_id: 1, _time: 1, text, status: 1, metadata: null });
+const item = (uid: string, turn_id: number, text: string, metadata: Item['metadata'] = null): Item => ({ uid, turn_id, stream_id: 1, _time: 1, text, status: 1, metadata });
 const TRANSCRIPT_EVENT = 'transcript-updated';
 
 function fakeSdks(overrides: { login?: () => Promise<unknown>; subscribe?: () => Promise<unknown>; logout?: () => Promise<unknown>; renew?: () => Promise<unknown>; init?: () => Promise<void> } = {}) {
@@ -46,10 +46,17 @@ const settle = () => new Promise(resolve => setImmediate(resolve));
 
 test('transcript lines separate the detective from the suspect and drop empty turns', () => {
   assert.deepEqual(toTranscriptLines([item('0', 1, 'Where were you?'), item('123456-case-1', 1, 'At home.Alone.'), item('123456-case-1', 2, '   ')]), [
-    { id: '0-1-1', speaker: 'detective', text: 'Where were you?' },
-    { id: '123456-case-1-1-1', speaker: 'suspect', text: 'At home. Alone.' },
+    { id: '0-1-1', speaker: 'detective', text: 'Where were you?', final: true },
+    { id: '123456-case-1-1-1', speaker: 'suspect', text: 'At home. Alone.', final: true },
   ]);
   assert.equal(normalizeTranscriptSpacing('Yes,sir.  It cost 3.50 dollars'), 'Yes, sir. It cost 3.50 dollars');
+});
+test('a player turn is final only when the transcription says so, since text mode stamps every item as ended', () => {
+  const user = (final: boolean) => ({ object: 'user.transcription', final } as unknown as Item['metadata']);
+  const agent = (turn_status: number) => ({ object: 'assistant.transcription', turn_status } as unknown as Item['metadata']);
+  assert.deepEqual(toTranscriptLines([item('0', 1, 'Where were', user(false)), item('0', 2, 'Where were you?', user(true)), item('9', 1, 'At', agent(0)), item('9', 2, 'At home.', agent(1)), item('9', 3, 'At the', agent(2))]).map(line => [line.speaker, line.final]),
+    [['detective', false], ['detective', true], ['suspect', false], ['suspect', true], ['suspect', true]]);
+  assert.equal(toTranscriptLines([{ ...item('0', 1, 'Hello'), status: 0 }])[0].final, false);
 });
 test('captions bind the toolkit before the RTM subscribe, then replace the full history', async () => {
   const { sdks, calls, handlers } = fakeSdks();
@@ -149,7 +156,9 @@ test('the real toolkit turns RTM transcription messages into lines, then lets go
   deliver('123456', { ...base, object: 'user.transcription', text: 'Where were', turn_id: 1, final: false });
   deliver('123456', { ...base, object: 'user.transcription', text: 'Where were you?', turn_id: 1, final: true });
   deliver('123456', { ...base, object: 'assistant.transcription', text: 'At home.Alone.', turn_id: 1, quiet: false, turn_seq_id: 1, turn_status: 1 });
-  assert.deepEqual(lines.at(-1)?.map(line => [line.speaker, line.text]), [['detective', 'Where were you?'], ['suspect', 'At home. Alone.']]);
+  assert.deepEqual(lines.at(-1)?.map(line => [line.speaker, line.text, line.final]), [['detective', 'Where were you?', true], ['suspect', 'At home. Alone.', true]]);
+  // The interim user transcription arrived first, so the detective line was once not final.
+  assert.equal(lines.some(batch => batch.some(line => line.speaker === 'detective' && !line.final)), true);
   assert.equal(new Set(lines.at(-1)?.map(line => line.id)).size, 2);
   await transcript.release();
   assert.equal(rtmListeners.get('message')?.size, 0);

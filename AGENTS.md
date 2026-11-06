@@ -15,7 +15,7 @@ Check facts about live systems before relying on them. Status notes here can go 
 1. Open https://alibai-game.vercel.app/rules on a laptop or phone with a microphone. Chrome is the safest choice.
 2. Sign in with Google, enter a detective name, and test your microphone.
 3. Assign a case, read the briefing, and enter the interrogation room. The interview connects by itself, and the clock starts only once the suspect's audio and video are playing.
-4. Question the suspect aloud for up to three minutes. Suggested questions are only hints: tapping one sends nothing.
+4. Question the suspect aloud for up to three minutes. The notebook lists leads to say aloud: a lead is marked asked when your captions match it, and answered, with the suspect's words beneath it, once the server records the fact. Tapping one only highlights it; nothing is sent.
 5. End the interview, choose guilty or innocent, and cite evidence.
 6. See the truth, your score and any missed clues, then check the leaderboard.
 
@@ -24,7 +24,7 @@ Check facts about live systems before relying on them. Status notes here can go 
 | Area | Where | Why it matters |
 | --- | --- | --- |
 | Live voice and video | `lib/agora/`, `components/game/production-session.tsx` | Real-time AI suspect, with the clock gated on real media readiness |
-| Hidden answers stay hidden | `supabase/migrations/`, `lib/scenarios/schema.ts` | Private truth lives in server-only tables, and browsers get allowlisted fields only |
+| Hidden answers stay hidden | `supabase/migrations/`, `lib/scenarios/schema.ts`, `leads()` in `lib/scenarios/engine.ts` | Private truth lives in server-only tables, and browsers get allowlisted fields only: a lead carries a recorded fact's statement and nothing about an undiscovered one |
 | Verifiable discovery | `lib/server/provider-facts.ts`, `session_action` in SQL | Facts count only when server-side checks pass, never from a browser claim |
 | Case quality | `lib/scenarios/validate.ts`, `lib/scenarios/cases/`, `docs/writing-cases.md` | Timelines, access, clue reachability and answer keys are checked before publishing, and public text is checked for guilt tells across the whole set |
 | Fair assignment | `assign_scenario` in SQL | Atomic, idempotent, no repeats per player, with guilt never chosen at random at join time |
@@ -91,7 +91,7 @@ pnpm data:setup                                      # applies migrations and ca
 
 ```text
 app/                      pages and API routes
-  api/sessions/[id]/[action]/   read, notebook, questions, agent, agent-ready,
+  api/sessions/[id]/[action]/   read, notebook, questions (unused by the UI), agent, agent-ready,
                                 sync-facts, end, verdict, start (dev only)
   api/auth, api/auth/google, auth/callback
 components/game/          game UI; production-session.tsx is the main screen
@@ -116,7 +116,7 @@ Session states: `created → preparing → active → ended → scored`, or `aba
 2. The player reads the briefing and enters the room, which connects automatically.
 3. `POST .../agent` claims the run and starts the agent with server-built instructions. It returns RTC credentials.
 4. The browser publishes the mic. Once suspect audio **and** video decode, the suspect shows and `POST .../agent-ready` starts the clock. A start acknowledgement alone never starts it.
-5. Every 5 seconds, `sync-facts` reads provider history on the server and records verified facts, which unlock evidence and follow-up questions.
+5. Every 5 seconds, `sync-facts` reads provider history on the server and records verified facts, which unlock evidence and follow-up leads. `leads()` marks a lead answered once a fact in its `revealsFactIds` is recorded; a recorded fact no lead on the page lists comes back as an admission.
 6. `POST .../end` runs a final sync, ends the session, and stops the agent.
 7. `POST .../verdict` accepts one verdict. SQL calculates the score.
 
@@ -125,7 +125,7 @@ Scoring: verdict 500, pivotal evidence 300, facts 150, time 50. Evidence points 
 ## Rules to keep
 
 - Secrets stay on the server. Never send truth, answer keys, unlock conditions or undiscovered evidence to the browser. Public shapes come from `publicEvidenceDTO`, `questionDTO`, `briefing` and `notebook`.
-- Browsers can't award facts. No client request may carry a transcript, fact ID or score. Live captions are display only.
+- Browsers can't award facts. No client request may carry a transcript, fact ID or score. Live captions are display only: `lib/game/lead-matching.ts` reads finished player captions to mark a notebook lead as asked, in the browser, and that mark goes nowhere.
 - The server owns time. Browser timers are for display, and the countdown is corrected with `serverTime`. The tick lives in `session-clock.tsx`, so it doesn't re-render the session.
 - Every client-reachable table has RLS. Game RPCs are service-role only. Don't add broad grants to make something work.
 - Guilt is fixed per case. Scenario content and session casting are immutable, enforced by triggers.

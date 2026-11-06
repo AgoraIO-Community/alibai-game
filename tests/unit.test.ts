@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import { fixtures } from '../lib/scenarios/fixtures';
 import { fingerprint, similarity } from '../lib/scenarios/fingerprint';
 import { validateScenario, validateCaseSet } from '../lib/scenarios/validate';
-import { briefing, notebook, score, suggestions } from '../lib/scenarios/engine';
+import { briefing, leads, notebook, score, suggestions } from '../lib/scenarios/engine';
 import { generateScenario, HumanReviewRequired, StructuredJsonProvider, type JsonProvider } from '../lib/scenarios/generator';
 import type { Scenario } from '../lib/scenarios/schema';
 import { stepTimer } from '../lib/server/timing';
@@ -90,6 +90,57 @@ test('question selection is pure and cannot unlock a clue; fact discovery unlock
  assert.ok(suggestions(s, ['fact-1']).questions.some(q => q.id === 'question-5'));
  assert.equal(suggestions(s, [], 3).more, null);
  assert.throws(() => suggestions(s, [], -1));
+});
+test('leads carry only allowlisted fields, and an open lead never names the fact it would reveal', () => {
+ const s = clone();
+ const before = leads(s, []);
+ assert.ok(before.leads.length >= 3); assert.deepEqual(before.admissions, []);
+ for (const lead of before.leads) { assert.deepEqual(Object.keys(lead).sort(), ['facts','id','status','text']); assert.equal(lead.status, 'open'); assert.deepEqual(lead.facts, []); }
+ const serialized = JSON.stringify(before);
+ for (const forbidden of ['revealsFactIds','prerequisiteIds','category','priority','spoilerSafety','statement','disclosurePhrases', ...s.knowledge.facts.map(f => f.statement), ...s.knowledge.facts.map(f => f.id)]) assert.equal(serialized.includes(forbidden), false, forbidden);
+ const after = leads(s, ['fact-1']);
+ const answered = after.leads.filter(l => l.status === 'answered');
+ assert.deepEqual(answered.map(l => l.id), s.suggestedQuestions.filter(q => q.revealsFactIds.includes('fact-1')).map(q => q.id));
+ for (const lead of answered) { assert.deepEqual(lead.facts, [{ id: 'fact-1', statement: s.knowledge.facts[0].statement }]); assert.deepEqual(Object.keys(lead.facts[0]).sort(), ['id','statement']); }
+ // Facts that are still undiscovered stay out, whatever their lead says.
+ const afterText = JSON.stringify(after);
+ for (const fact of s.knowledge.facts.slice(1)) { assert.equal(afterText.includes(fact.statement), false, fact.id); assert.equal(afterText.includes(`"${fact.id}"`), false, fact.id); }
+ // An unknown fact ID is ignored rather than trusted.
+ assert.deepEqual(leads(s, ['not-a-fact']), before);
+});
+test('a recorded fact that no lead on the page lists still shows, as an admission', () => {
+ const s = clone();
+ // question-6 reveals fact-3 behind fact-2, and question-7 reveals it with no prerequisite; hide both routes.
+ s.suggestedQuestions = s.suggestedQuestions.filter(q => !q.revealsFactIds.includes('fact-3'));
+ const page = leads(s, ['fact-3']);
+ assert.deepEqual(page.admissions, [{ id: 'fact-3', statement: s.knowledge.facts[2].statement }]);
+ assert.equal(page.leads.some(l => l.status === 'answered'), false);
+ // Once a lead that lists the fact is eligible, it owns the fact and the admission goes away.
+ const listed = leads(clone(), ['fact-3']);
+ assert.deepEqual(listed.admissions, []);
+ assert.ok(listed.leads.some(l => l.status === 'answered' && l.facts[0]?.id === 'fact-3'));
+});
+test('follow-ups surface as facts unlock them, in priority order, and a player with facts left always has an open lead', () => {
+ const s = clone();
+ const start = leads(s, []).leads.map(l => l.id);
+ assert.equal(start.includes('question-5'), false, 'needs record-1'); assert.equal(start.includes('question-6'), false, 'needs fact-2');
+ const withOne = leads(s, ['fact-1']).leads;
+ assert.deepEqual(withOne.slice(0, 2).map(l => [l.id, l.status]), [['question-1', 'answered'], ['question-5', 'open']], 'record-1, unlocked by fact-1, brings its priority-1 follow-up up beside the answered lead');
+ assert.ok(leads(s, ['fact-1','fact-2']).leads.some(l => l.id === 'question-6' && l.status === 'open'));
+ // Every reachable state of every case: facts remaining implies an open lead on the page.
+ for (const scenario of fixtures) {
+  const ids = scenario.knowledge.facts.map(f => f.id);
+  for (let mask = 0; mask < 1 << ids.length; mask++) {
+   const found = ids.filter((_, i) => mask & (1 << i));
+   if (!scenario.knowledge.facts.every(f => !found.includes(f.id) || f.prerequisiteFactIds.every(id => found.includes(id)))) continue;
+   const page = leads(scenario, found);
+   assert.ok(page.leads.length <= 10, scenario.title);
+   if (found.length < ids.length) assert.ok(page.leads.some(l => l.status === 'open'), `${scenario.title} with ${found.join(',')}`);
+   else assert.equal(page.leads.some(l => l.status === 'open'), false, scenario.title);
+   assert.equal(page.leads.filter(l => l.status === 'answered').flatMap(l => l.facts).concat(page.admissions).every(f => found.includes(f.id)), true, scenario.title);
+   for (const id of found) assert.ok(page.leads.some(l => l.facts.some(f => f.id === id)) || page.admissions.some(f => f.id === id), `${scenario.title}: ${id} must show`);
+  }
+ }
 });
 test('deterministic score caps, rounding, unknown facts, duplicate citations and misleading evidence', () => {
  const s = clone(), allFacts = s.knowledge.facts.map(f => f.id), pivotal = s.answerKey.pivotal.map(p => p.evidenceId);
