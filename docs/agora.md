@@ -76,14 +76,26 @@ Use one neutral line for every audition, such as “I was working that evening. 
 1. Authenticate the player and verify session ownership and briefing state.
 2. Reserve agent startup transactionally so retries cannot spawn extra agents.
 3. Build `instructions` with `buildSuspectAgentContext()` from the immutable assigned scenario; read `avatarId` and `minimax_voice_id` from the persisted session row and validate them against the approved catalogs. Never accept a prompt, avatar ID, voice ID, channel, agent ID, or UID from browser input.
-4. Start the adapter and persist its returned `agentId`. Clean up or reconcile a start whose persistence fails.
-5. Return only `createPlayerRtcCredentials(sessionId)` and safe session metadata.
+4. Start the adapter and persist its returned `agentId`. Stop the agent if persistence fails. `connectVoice` returns before this happens and runs it in `after()`.
+5. Return only `createPlayerRtcCredentials(sessionId)` and safe session metadata. Token generation is local, so the browser has its tokens before the agent exists.
 6. Wait for verified media readiness before starting the three-minute game clock. An accepted start call is not proof the player has heard audio.
 7. Call `stopSuspectAgent()` using the persisted agent ID at the deadline/end; retain retryable cleanup state if the provider fails.
 
 The browser joins RTC with numeric `uid`, subscribes to the agent's audio and avatar's video, and logs into RTM using `rtmUid`, a per-session string derived from the session ID because RTM allows one login per user ID across the project (the agent needs only the RTC `uid` in `remote_rtc_uids`). RTC uses `rtcToken`; RTM uses `rtmToken`. The app certificate, avatar token, private case prompt, and provider keys never belong in the browser response.
 
 The managed model receives only the immutable instructions for this session. A future trusted transcript ingestion adapter must authenticate provider events, match the stored agent ID/session, and pass only actually delivered suspect speech to `recordFactRevealed()`. Browser captions, question clicks, and user-supplied fact IDs are not evidence. The server validates disclosures against the contract; an agent's statement cannot award arbitrary points. That transcript ingestion bridge is a separate integration boundary, not an unauthenticated browser endpoint.
+
+## Connect flow
+
+`connect` returns tokens and starts the agent in Next's `after()`, so the player is normally in the channel before the agent.
+
+- **Duration:** `after()` uses Vercel's `waitUntil`, which shares the function's limit and is cancelled at it. The sessions route sets `maxDuration = 300`, the Hobby maximum with Fluid compute. `client()` limits Agora calls to 30 seconds and 1 retry, because the SDK default of 60 seconds and 2 retries could use the whole budget. A worst-case start, commit, stop and failure record takes about 270 seconds. Without Fluid compute this `maxDuration` would be refused at deploy, which is the failure we want.
+- **Not durable:** `after()` doesn't retry or survive a crash. The browser's 60-second deadline, armed when `connect` returns, covers that case by ending the session.
+- **Failure:** `agent_lifecycle failed` abandons the session. The browser polls `read` every 3 seconds until media is ready, and Realtime and `ready` carry the same state.
+- **Media before commit:** `ready` answers `AGENT_START_PENDING` and the browser retries every 500 ms until the deadline. The clock doesn't start for an uncommitted run.
+- **Cancel:** `end` before commit abandons the session, so commit raises `AGENT_STATE_CONFLICT` and `after()` stops the agent. Before commit `stop` has no agent ID, so the `after()` task is the side that cleans up.
+- **Status check:** `ready` still reads Agora's status before starting the clock, which costs one provider call and one extra database read per game. Decoded frames can only come from the agent's reserved UIDs, because the browser's token only allows its own, so this check could go once staging shows it never fails.
+- **Greeting:** `llm.greeting_configs.mode` is `single_first`, so a reconnect doesn't replay it. [Agora's reference](https://docs.agora.io/en/api-reference/api-ref/conversational-ai/join) describes greetings only for users who join, not for a user already in the channel when the agent arrives. This needs confirming live. It matters beyond the greeting itself: if no audio plays, the audio decode never fires and the 60-second deadline ends the session.
 
 ## Runtime status
 
@@ -94,7 +106,7 @@ Source inspection is complete. Credential binding, official sample startup, agen
 
 `lib/agora/use-suspect-voice.ts` adapts the inspected official quickstart `components/ConversationComponent.tsx` lifecycle and the bundled RTC Web reference into the existing game screen. It uses `agora-rtc-sdk-ng@4.24.3` directly, keeping the existing component tree. `production-session.tsx` hosts the remote avatar stage and controls.
 
-The browser requests microphone access before creating a cloud agent, registers media listeners before joining, publishes one microphone track, and subscribes only to the server-assigned agent/avatar UIDs. It waits for first decoded audio and avatar video frames before calling `/agent-ready`; a server start response alone does not start the clock. It plays at most one remote audio stream, supports mute and autoplay recovery, renews expiring RTC tokens, and leaves/closes tracks at the deadline or on navigation. The trusted cleanup worker remains necessary when browsers disappear.
+The browser requests microphone access before creating a cloud agent, calls `/connect`, joins straight away, registers media listeners before joining, publishes one microphone track, and subscribes only to the server-assigned agent/avatar UIDs. It waits for first decoded audio and avatar video frames before calling `/ready`; a server start response alone does not start the clock. It plays at most one remote audio stream, supports mute and autoplay recovery, renews expiring RTC tokens, and leaves/closes tracks at the deadline or on navigation. The trusted cleanup worker remains necessary when browsers disappear.
 
 No browser RTC/RTM message can mark a fact discovered. `lib/agora/live-transcript.ts` shows live captions on the tape recorder above the Detective's Notebook (`components/game/tape-recorder.tsx`) using `agora-agent-client-toolkit` over RTM, following the official quickstart's RTM login and `AgoraVoiceAI` lifecycle. Captions are display only: they are never sent to the server and take no part in the readiness gate. They start beside the RTC join without being awaited, so an RTM or toolkit failure only shows an "unavailable" note. Caption delivery has not been verified in a live session. The authenticated `sync-facts` action now retrieves managed provider history on the server and verifies complete canonical assistant utterances; its history proves generated output rather than per-turn audio delivery. Browser media code has passed TypeScript checking; real microphone, audio and avatar playback have not yet been verified.
 # Trusted history synchronization
