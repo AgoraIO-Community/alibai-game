@@ -145,7 +145,7 @@ export function useSuspectVoice(sessionId: string, onView: (view: SessionView) =
           if(mediaType === 'video' && user.videoTrack) {
             videoRef.current = user.videoTrack
             user.videoTrack.on('first-frame-decoded', () => { marks.mark(`${remoteRole(user.uid)}-decoded-video`); videoDecoded = true; void markReady() })
-            if(videoElement.current) user.videoTrack.play(videoElement.current, { fit:'contain' })
+            if(videoElement.current) user.videoTrack.play(videoElement.current, { fit:'cover' })
           }
         } catch { if(isCurrent()) setError('A remote media track could not be opened. Check your connection and retry.') }
       })

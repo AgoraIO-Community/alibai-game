@@ -1,6 +1,6 @@
 import './only';
 import { z } from 'zod';
-import { briefing,notebook,suggestions } from '../scenarios/engine';
+import { briefing,leads,notebook,suggestions } from '../scenarios/engine';
 import { allEvidence,publicEvidenceDTO,scenarioSchema,type Scenario } from '../scenarios/schema';
 import { GameError,rpc,rest } from './db';
 export interface SessionRow{id:string;player_id:string;scenario_id:string;avatar_id:string;minimax_voice_id:string;state:string;started_at:string|null;ended_at:string|null}
@@ -18,7 +18,7 @@ export function results(snap:Snapshot){
   citedEvidence:allEvidence(snap.scenario).filter(e=>snap.verdict!.evidence_ids.includes(e.id)).map(e=>({...publicEvidenceDTO(e),interpretation:e.interpretation})),
   missedImportantClues:snap.scenario.answerKey.pivotal.filter(p=>!snap.verdict!.evidence_ids.includes(p.evidenceId)).map(p=>({evidence:publicEvidenceDTO(allEvidence(snap.scenario).find(e=>e.id===p.evidenceId)!),why:p.why}))};
 }
-export function projectSnapshot(snap:Snapshot,sessionId:string){return {session:{id:snap.session.id,state:snap.session.state,started_at:snap.session.started_at,ended_at:snap.session.ended_at},serverTime:new Date().toISOString(),briefing:briefing(snap.scenario,sessionId,{avatarId:snap.session.avatar_id,voiceId:snap.session.minimax_voice_id}),notebook:notebook(snap.scenario,snap.factIds),suggestions:suggestions(snap.scenario,snap.factIds),...(snap.session.state==='scored'?{results:results(snap)}:{})}}
+export function projectSnapshot(snap:Snapshot,sessionId:string){return {session:{id:snap.session.id,state:snap.session.state,started_at:snap.session.started_at,ended_at:snap.session.ended_at},serverTime:new Date().toISOString(),briefing:briefing(snap.scenario,sessionId,{avatarId:snap.session.avatar_id,voiceId:snap.session.minimax_voice_id}),notebook:notebook(snap.scenario,snap.factIds),...leads(snap.scenario,snap.factIds),suggestions:suggestions(snap.scenario,snap.factIds),...(snap.session.state==='scored'?{results:results(snap)}:{})}}
 export async function readProjection(playerId:string,sessionId:string){return projectSnapshot(await loadSession(playerId,sessionId),sessionId)}
 export async function getSuggestedQuestions(playerId:string,sessionId:string,offset=0){const snap=await loadSession(playerId,sessionId);return suggestions(snap.scenario,snap.factIds,offset)}
 export async function getNotebook(playerId:string,sessionId:string){const snap=await loadSession(playerId,sessionId);return notebook(snap.scenario,snap.factIds)}

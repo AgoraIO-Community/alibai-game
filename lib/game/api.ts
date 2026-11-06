@@ -10,6 +10,10 @@ export interface PublicEvidence {
   availability: 'public' | 'discoverable'
 }
 export interface PublicQuestion { id: string; text: string }
+/** A fact the server has recorded, in the suspect's own words. Never present for an undiscovered fact. */
+export interface RecordedFact { id: string; statement: string }
+/** A question on the notebook page. The server says open or answered; "asked" is a browser-only reading of the captions. */
+export interface Lead extends PublicQuestion { status: 'open' | 'answered'; facts: RecordedFact[] }
 export interface Briefing {
   sessionId: string
   caseId: string
@@ -24,6 +28,9 @@ export interface SessionView {
   serverTime: string
   briefing: Briefing
   notebook: PublicEvidence[]
+  leads: Lead[]
+  /** Recorded facts that no lead on the page lists, so they still show. */
+  admissions: RecordedFact[]
   suggestions: { questions: PublicQuestion[]; more: number | null }
   results?: {
     correctVerdict: 'guilty' | 'innocent'

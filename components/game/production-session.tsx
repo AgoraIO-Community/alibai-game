@@ -5,7 +5,7 @@ import { createClient } from '@supabase/supabase-js'
 import { useRouter } from 'next/navigation'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Button } from '@/components/ui/button'
-import { gameRequest, sessionRequest, type PublicEvidence, type PublicQuestion, type SessionView } from '@/lib/game/api'
+import { gameRequest, sessionRequest, type PublicEvidence, type SessionView } from '@/lib/game/api'
 import { DecoRule, Eyebrow } from './deco'
 import { InterviewScreen } from './interview-screen'
 import { SessionClock } from './session-clock'
@@ -28,9 +28,6 @@ export function ProductionSession({ sessionId, mode }: { sessionId: string; mode
   const [view, setView] = useState<SessionView | null>(null)
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
-  const [questions, setQuestions] = useState<PublicQuestion[]>([])
-  const [more, setMore] = useState<number | null>(null)
-  const [selectedQuestion, setSelectedQuestion] = useState<string | null>(null)
   const [decision, setDecision] = useState<'guilty' | 'innocent' | null>(null)
   const [evidenceIds, setEvidenceIds] = useState<string[]>([])
   const [reasoning, setReasoning] = useState('')
@@ -38,13 +35,10 @@ export function ProductionSession({ sessionId, mode }: { sessionId: string; mode
   const syncingFacts = useRef(false)
   const autoConnected = useRef(false)
   const autoEnded = useRef(false)
-  const questionOffset = useRef(0)
   const applyView = useCallback((data: SessionView) => {
     // A read that was in flight when the clock started must not undo it.
     setView(current => current?.session.started_at && !data.session.started_at ? current : data)
     setClockOffset(Date.parse(data.serverTime) - Date.now())
-    // Background updates only carry page one; leave a page the player opened alone.
-    if(questionOffset.current === 0) { setQuestions(data.suggestions.questions); setMore(data.suggestions.more) }
   }, [])
   const refresh = useCallback(async () => {
     try {
@@ -105,14 +99,6 @@ export function ProductionSession({ sessionId, mode }: { sessionId: string; mode
     catch (e) { setError(e instanceof Error ? e.message : 'Request failed.'); return false }
     finally { setBusy(false) }
   }
-  async function nextQuestions() {
-    try {
-      const offset = more ?? 0
-      const page = await gameRequest<{ questions: PublicQuestion[]; more: number | null }>(`/api/sessions/${sessionId}/questions?offset=${offset}`)
-      questionOffset.current = offset
-      setQuestions(page.questions); setMore(page.more); setSelectedQuestion(null)
-    } catch (e) { setError(e instanceof Error ? e.message : 'Could not load questions.') }
-  }
   const started = view?.session.started_at ? Date.parse(view.session.started_at) : null
   const ended = view?.session.ended_at ? Date.parse(view.session.ended_at) : null
   const timing = { startedAt: started, endedAt: ended, clockOffset }
@@ -136,8 +122,7 @@ export function ProductionSession({ sessionId, mode }: { sessionId: string; mode
   }, [mode, view?.session.state, voice.phase, voice.start, started, ended, clockOffset])
 
   // The room has its own one-viewport layout; the handlers stay here so the dossier pages share them.
-  if (mode === 'interview') return <InterviewScreen view={view} error={error} busy={busy} timing={timing} voice={voice}
-    questions={questions} more={more} selectedQuestion={selectedQuestion} onSelectQuestion={setSelectedQuestion} onNextQuestions={() => void nextQuestions()} onRefresh={() => void refresh()}
+  if (mode === 'interview') return <InterviewScreen view={view} error={error} busy={busy} timing={timing} voice={voice} onRefresh={() => void refresh()}
     onCancelConnection={async()=>{await voice.disconnect();await action('end')}}
     onRetryConnection={async () => { await voice.disconnect(); await voice.start() }}
     onEndInterview={async () => { if(!view) return; if(view.session.state === 'scored') router.push(`/game/${sessionId}/results`); else if(view.session.state === 'ended' || await action('end')) { await voice.disconnect(); router.push(`/game/${sessionId}/verdict`) } }} />
