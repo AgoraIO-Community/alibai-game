@@ -20,7 +20,29 @@ const UNDERCUTTING = new Set(['not', 'never', 'no', 'nobody', 'nothing', 'nor', 
   'perhaps', 'claim', 'claims', 'claimed', 'say', 'says', 'said', 'told', 'tell', 'asked', 'allegedly', 'whether']);
 const RETRACTION = /\b(false|untrue|not true|lie|lying|made up|joking|kidding)\b/;
 
-const sentencesOf = (content: string) => content.split(/(?<=[.!?…])\s+/).map(raw => raw.trim()).filter(Boolean);
+/**
+ * Sentence ends need no following space: real replies arrive as "break.My tool roll". When in
+ * doubt a sentence stays whole, because the rules above can only reject what shares its sentence.
+ * So these don't end one: a full stop before a digit (19.10) or after a lone letter (R. Mayhew,
+ * M.V, a.m.), a pause running on in lower case (I didn't… take it), and anything inside double
+ * quotes. A semi-colon never ends one: it joins clauses, so a denial reaches across it.
+ */
+function sentencesOf(content: string) {
+  const sentences: string[] = [];
+  let start = 0, quoted = false;
+  for (const { 0: mark, index } of content.matchAll(/["“”]|[.!?…]+/g)) {
+    if (/["“”]/.test(mark)) { quoted = !quoted; continue; }
+    const end = index + mark.length, rest = content.slice(end);
+    const notAnEnd = mark === '.'
+      ? /^\d/.test(rest) || /(?:^|[^\p{L}\d])\p{L}$/u.test(content.slice(start, index))
+      : /…|\.\./.test(mark) && /^\s*\p{Ll}/u.test(rest);
+    if (quoted || notAnEnd) continue;
+    sentences.push(content.slice(start, end));
+    start = end;
+  }
+  sentences.push(content.slice(start));
+  return sentences.map(raw => raw.trim()).filter(Boolean);
+}
 
 function statesPhrase(sentence: string, next: string | undefined, phrase: string) {
   if (/[?"“”]/.test(sentence)) return false;
