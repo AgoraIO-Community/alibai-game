@@ -12,13 +12,14 @@ import { leaderboardPath } from '../lib/game/api';
 // No network: every request lands in this stub, using made-up configuration.
 const fake = { NEXT_PUBLIC_SUPABASE_URL: 'http://supabase.invalid', SUPABASE_SECRET_KEY: 'sb_secret_test', NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: 'test', NEXT_PUBLIC_AGORA_APP_ID: 'a'.repeat(32), NEXT_AGORA_APP_CERTIFICATE: 'b'.repeat(32), ANAM_API_KEY: 'test' };
 const realFetch = globalThis.fetch, playerId = randomUUID(), sessionId = randomUUID();
-const scenario = fixtures[0];
+let scenario = fixtures[0];
 let calls: string[], sessionRow: Record<string, unknown>, history: { role: string; content: string }[], historyAt: number;
+let actions: { action: string; payload: Record<string, string> }[], stored: string[], factIds: string[], runsQuery: string, turnError: string | null;
 beforeEach(() => {
   Object.assign(process.env, fake);
-  calls = []; history = []; historyAt = 0;
+  scenario = fixtures[0]; calls = []; history = []; historyAt = 0; actions = []; stored = []; factIds = []; runsQuery = ''; turnError = null;
   sessionRow = { id: sessionId, player_id: playerId, scenario_id: scenario.scenarioId, avatar_id: 'x', minimax_voice_id: 'x', state: 'active', started_at: '2026-11-05T12:00:00.000Z', ended_at: null };
-  globalThis.fetch = (async (input: RequestInfo | URL) => {
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = new URL(input instanceof Request ? input.url : String(input));
     if (url.hostname !== 'supabase.invalid') {
       calls.push('agora'); await new Promise(done => setTimeout(done, 5)); historyAt = Date.now();
@@ -26,9 +27,20 @@ beforeEach(() => {
     }
     const name = url.pathname.replace('/rest/v1/', '').replace('/rpc/', '');
     calls.push(name);
-    if (name === 'rpc/session_action') return Response.json({ session: sessionRow, scenario, factIds: [], score: null, verdict: null });
+    if (name === 'rpc/session_action') {
+      const { p_action: action, p_payload: payload } = JSON.parse(String(init?.body));
+      if (action === 'read') return Response.json({ session: sessionRow, scenario, factIds, score: null, verdict: null });
+      actions.push({ action, payload });
+      if (action === 'turn' && turnError) return Response.json({ message: turnError }, { status: 400 });
+      if (action === 'turn' && !stored.includes(payload.turnId)) stored.push(payload.turnId);
+      if (action === 'fact') factIds.push(payload.factId);
+      return Response.json({});
+    }
     if (name === 'rpc/read_leaderboard') return Response.json([{ playerId, detectiveName: 'Test', total: 900, bestScore: 900, gamesPlayed: 1 }]);
-    if (name === 'agent_runs') return Response.json([{ agent_id: 'agent-1', state: 'running' }]);
+    if (name === 'agent_runs') {
+      runsQuery = url.search;
+      return Response.json([{ agent_id: 'agent-1', state: 'running', game_sessions: { session_events: stored.map(turn_id => ({ turn_id })) } }]);
+    }
     if (name === 'game_sessions') return Response.json([{ player_id: playerId }]);
     throw new Error(`Unexpected request: ${name}`);
   }) as typeof fetch;
@@ -48,6 +60,61 @@ test('a sync that records a fact re-reads so the view includes it', async () => 
   await syncProviderFacts(playerId, sessionId);
   assert.equal(calls.at(-1), 'rpc/session_action');
   assert.equal(calls.filter(name => name === 'rpc/session_action').length, 4);
+});
+test('an unmatched reply is kept once, under the same ID, with no extra call on later polls', async () => {
+  sessionRow = { ...sessionRow, started_at: new Date().toISOString() };
+  history = [{ role: 'user', content: 'Where were you?' }, { role: 'assistant', content: ' Out. ' }, { role: 'assistant', content: 'Out.' }, { role: 'assistant', content: '  ' }];
+  const first = await syncProviderFacts(playerId, sessionId);
+  assert.match(decodeURIComponent(runsQuery), /select=agent_id,state,game_sessions\(session_events\(turn_id\)\)/);
+  assert.equal(actions.length, 1);
+  assert.deepEqual({ ...actions[0].payload, turnId: '' }, { turnId: '', actor: 'suspect', transcript: 'Out.', source: 'agora-provider-history' });
+  assert.match(actions[0].payload.turnId, /^agora-history-[0-9a-f]{64}$/);
+  assert.equal(JSON.stringify(first).includes('agora-history-'), false);
+  calls = []; actions = [];
+  history = [{ role: 'assistant', content: 'Out.' }, { role: 'user', content: 'Where were you?' }];
+  await syncProviderFacts(playerId, sessionId);
+  assert.deepEqual(calls, ['rpc/session_action', 'agent_runs', 'agora']);
+  history.push({ role: 'assistant', content: 'Still out.' });
+  await syncProviderFacts(playerId, sessionId);
+  assert.deepEqual(actions.map(item => item.payload.transcript), ['Still out.']);
+});
+test('a locked reply kept earlier proves its fact later, under the same ID and source', async () => {
+  sessionRow = { ...sessionRow, started_at: new Date().toISOString() };
+  scenario = structuredClone(fixtures[0]);
+  const [needed, locked] = scenario.knowledge.facts;
+  needed.prerequisiteFactIds = []; locked.prerequisiteFactIds = [needed.id];
+  history = [{ role: 'assistant', content: locked.disclosurePhrases[0] }];
+  await syncProviderFacts(playerId, sessionId);
+  assert.deepEqual(actions.map(item => item.action), ['turn']);
+  const kept = actions[0].payload;
+  history.push({ role: 'assistant', content: needed.disclosurePhrases[0] });
+  await syncProviderFacts(playerId, sessionId);
+  await syncProviderFacts(playerId, sessionId);
+  assert.deepEqual(factIds, [needed.id, locked.id]);
+  assert.deepEqual(actions.at(-2)?.payload, kept);
+  assert.equal(actions.at(-1)?.payload.turnId, kept.turnId);
+  assert.equal(actions.at(-1)?.payload.source, kept.source);
+});
+test('scoring writes run first, and keeping a reply can never fail or reshape a sync', async () => {
+  sessionRow = { ...sessionRow, started_at: new Date().toISOString() };
+  const fact = scenario.knowledge.facts.find(item => !item.prerequisiteFactIds.length)!;
+  history = [{ role: 'assistant', content: 'Out.' }, { role: 'assistant', content: fact.disclosurePhrases[0] }];
+  await syncProviderFacts(playerId, sessionId);
+  assert.deepEqual(actions.map(item => item.action), ['turn', 'fact', 'turn']);
+  assert.equal(actions[2].payload.transcript, 'Out.');
+  for (const message of ['NOT_ACTIVE', 'something else']) {
+    calls = []; actions = []; stored = []; turnError = message;
+    history = [{ role: 'assistant', content: 'One.' }, { role: 'assistant', content: 'Two.' }];
+    const view = await syncProviderFacts(playerId, sessionId);
+    assert.equal(view.session.state, 'active');
+    assert.equal(actions.length, 1, 'the first failure stops the pass');
+  }
+});
+test('no reply is written once the database would refuse it', async () => {
+  sessionRow = { ...sessionRow, started_at: new Date(Date.now() - 196_000).toISOString() };
+  history = [{ role: 'assistant', content: 'Out.' }];
+  await syncProviderFacts(playerId, sessionId);
+  assert.deepEqual(calls, ['rpc/session_action', 'agent_runs', 'agora']);
 });
 test('a sync still refuses a session that is not active', async () => {
   sessionRow = { ...sessionRow, state: 'ended' };
