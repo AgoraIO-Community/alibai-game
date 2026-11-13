@@ -53,7 +53,7 @@ Check facts about live systems before relying on them. Status notes here can go 
 | What | Where |
 | --- | --- |
 | Production | https://alibai-game.vercel.app/ |
-| GitHub | `digitallysavvy/alibai-game` |
+| GitHub | `AgoraIO-Community/alibai-game` |
 | Vercel | project `alibai-ui`, team scope `digitallysavvys-projects`, functions in `pdx1` next to Supabase (`vercel.json`). Pushing to `main` deploys production |
 | Supabase | project **Alibai**, ref `vfqxxkvokbgrooxhkdmi` |
 | Agora | project **testing** |
