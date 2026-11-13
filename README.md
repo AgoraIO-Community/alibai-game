@@ -127,6 +127,10 @@ Some things to know:
 - A guilty suspect's prompt includes what they did, so a determined player could try to coax it out. Innocent suspects aren't told who did it.
 - The first live games are still being tested, so expect rough edges.
 
+## Build your own
+
+[docs/ai/RECIPE.md](docs/ai/RECIPE.md) is the builder's guide: what the project shows on Agora Conversational AI, every account you need, local and hosted setup, how a game runs through the code, deployment and known limits. It's written for people and coding agents alike.
+
 ## More documentation
 
 - [AGENTS.md](AGENTS.md): full project guide, architecture rules and known gaps
@@ -135,3 +139,7 @@ Some things to know:
 - [docs/writing-cases.md](docs/writing-cases.md): how to write a case that's fair and hard to call
 - [docs/scenarios.md](docs/scenarios.md): validating and publishing cases
 - [docs/setup.md](docs/setup.md) and [docs/verification.md](docs/verification.md): earlier setup and test notes, which predate Google sign-in
+
+## License
+
+MIT. See [LICENSE](LICENSE).
