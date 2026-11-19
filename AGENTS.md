@@ -29,7 +29,7 @@ Check facts about live systems before relying on them. Status notes here can go 
 | Case quality | `lib/scenarios/validate.ts`, `lib/scenarios/cases/`, `docs/writing-cases.md` | Timelines, access, clue reachability and answer keys are checked before publishing, and public text is checked for guilt tells across the whole set |
 | Fair assignment | `assign_scenario` in SQL | Atomic, idempotent, no repeats per player, with guilt never chosen at random at join time |
 
-**Data model:** mysteries are pre-generated into `scenarios`, `suspects`, `evidence` and `suggested_questions`, with hidden truth and undiscovered evidence in separate server-only tables. The starting inventory is eight hand-authored cases, four guilty and four innocent, plus a catalog of 14 Anam avatars. `players` and `game_sessions` track accounts and assignments, while `session_events` keeps every suspect reply seen by the server, and `session_facts` and `session_clues` record validated discoveries. `verdicts` hold player input, and `scores` are calculated on the server for the leaderboard. There are 21 tables, all with RLS.
+**Data model:** mysteries are pre-generated into `scenarios`, `suspects`, `evidence` and `suggested_questions`, with hidden truth and undiscovered evidence in separate server-only tables. The inventory is sixteen hand-authored cases, eight guilty and eight innocent, plus a catalog of 14 Anam avatars. `players` and `game_sessions` track accounts and assignments, while `session_events` keeps every suspect reply seen by the server, and `session_facts` and `session_clues` record validated discoveries. `verdicts` hold player input, and `scores` are calculated on the server for the leaderboard. There are 21 tables, all with RLS.
 
 **Data quality:**
 
@@ -44,7 +44,7 @@ Check facts about live systems before relying on them. Status notes here can go 
 - 23 hosted database smoke checks passed before the latest recovery migration. They covered privacy, ownership, scoring and pool exhaustion.
 - 19 recovery-migration checks passed on embedded Postgres, using a throwaway script that isn't in this repo.
 - Production endpoints respond, and cross-origin POSTs are rejected with 403.
-- Not yet shown: a full live voice session, a completed production Google sign-in, or simultaneous joins on the hosted database.
+- Live games with Google sign-in have been played on production. Not yet shown: simultaneous joins on the hosted database.
 
 **Limits worth knowing:** see "Known gaps" below. The largest is that a fact only counts when the suspect uses one of its spoken lines, so a paraphrase earns nothing. How often that happens is unproven until live games are played.
 
@@ -166,14 +166,14 @@ If Google sends people to localhost, the app isn't the cause. Fix **Site URL** a
 
 ## Not yet verified
 
-No one has confirmed these working end to end: a live Agora and Anam session, a completed production Google sign-in, Realtime delivery in production, a full human playtest, `pnpm test:db`, or the voice mappings by ear.
+Live Agora and Anam sessions and production Google sign-in have been played. Not yet confirmed: Realtime delivery in production, `pnpm test:db`, and every voice mapping by ear.
 
 ## Known gaps
 
 - Fact discovery needs the suspect to use a fact's spoken line in a plain sentence. Punctuation, contractions and lead-ins are fine, but a paraphrase earns no credit. Facts are locked behind this to keep scoring trustworthy.
 - `buildSuspectAgentContext` sends the full case truth to the model, so a player could coax out the answer.
 - Ending the interview at once earns most of the time bonus.
-- Players hit `POOL_EXHAUSTED` after all 8 cases. Allowing replays would invite leaderboard farming.
+- Players hit `POOL_EXHAUSTED` after all 16 cases. Allowing replays would invite leaderboard farming.
 - Agent `idleTimeout` is 30 seconds, so reconnecting after a long drop may fail.
 - Calling `connect` on a session started through the dev-only `/start` path resets its clock.
 - Access tokens are verified locally, so a token revoked by logout or a ban works until it expires (one hour). Refresh tokens are still checked by Supabase.

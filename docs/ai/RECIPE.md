@@ -1,12 +1,12 @@
-# Build a voice detective game with Agora Conversational AI
+# How Alibai works
 
 Alibai is a voice detective game. The player reads a fictional case file, then questions one live AI suspect out loud for three minutes. The suspect is an Agora Conversational AI agent with an Anam avatar, ARES speech-to-text, `gpt-4o-mini` and a MiniMax voice. When time is up the player calls guilty or innocent, cites evidence, and the server scores the interview out of 1,000.
 
 Play it at [alibai-game.vercel.app](https://alibai-game.vercel.app). You need a Google account and a microphone.
 
-![Alibai landing page](../assets/alibai-landing.jpg)
+![Alibai](../assets/alibai-card.webp)
 
-This guide is for builders. It explains what the project shows on Agora, how to run it with your own accounts, how the pieces fit, and where the limits are. The stack is Next.js 16, React 19, TypeScript, Supabase (Postgres, Auth, Realtime) and Vercel.
+This guide is for builders: what the project shows on Agora, how the pieces fit, and where the limits are. The stack is Next.js 16, React 19, TypeScript, Supabase (Postgres, Auth, Realtime) and Vercel.
 
 ## What this recipe demonstrates
 
@@ -16,91 +16,9 @@ This guide is for builders. It explains what the project shows on Agora, how to 
 - **Live captions over RTM.** `agora-rtm` plus `agora-agent-client-toolkit` render both sides of the conversation on a tape recorder. Captions are display only and never reach the server.
 - **Server-side scoring from what the suspect actually said.** Every five seconds the server fetches the agent's history from Agora with server credentials, matches each reply against the case's scripted disclosure lines, and records facts in Postgres. The case truth, answer key and undiscovered evidence live in server-only tables; the browser gets allowlisted fields and can never award a point.
 
-## Prerequisites
+## Setup
 
-Accounts:
-
-| Account | What you need |
-| --- | --- |
-| [Agora](https://console.agora.io) | A project with Conversational AI enabled. You need its App ID and App Certificate. The managed ARES, OpenAI and MiniMax providers need no extra keys of your own. |
-| [Anam](https://anam.ai) | An API key. The avatar IDs the game uses are listed in [`lib/game/avatar-catalog.ts`](../../lib/game/avatar-catalog.ts); your key must have access to the actors you keep in that catalog. |
-| [Supabase](https://supabase.com) | A hosted project, or the Supabase CLI with Docker for a local stack. You need the project URL, the publishable key and the secret key. |
-| Google Cloud | An OAuth web client ID and secret, entered in Supabase's Google provider settings. Sign-in is Google-only. |
-
-Tools: Node 22 or newer, [pnpm](https://pnpm.io) (`package.json` pins `pnpm@12.3.4`), the [Supabase CLI](https://supabase.com/docs/guides/local-development/cli/getting-started), and optionally the [Agora CLI](https://github.com/AgoraIO/cli) to write the Agora keys for you.
-
-## Run it locally
-
-### 1. Install
-
-```sh
-git clone https://github.com/AgoraIO-Community/alibai-game.git
-cd alibai-game
-pnpm install --frozen-lockfile
-cp env.example .env.local
-```
-
-### 2. Create the database
-
-The schema is in [`supabase/migrations/`](../../supabase/migrations) and the sixteen cases are in [`lib/scenarios/cases/`](../../lib/scenarios/cases). Pick one path.
-
-**Local Supabase with Docker:**
-
-```sh
-supabase start
-pnpm data:setup:local
-```
-
-`pnpm data:setup:local` runs `supabase db push --include-seed` against the local stack, which applies the migrations and publishes the cases. `supabase status` prints the local URL and keys for `.env.local`.
-
-**Hosted Supabase project:**
-
-```sh
-supabase login
-supabase link --project-ref <your-project-ref>
-pnpm data:setup
-```
-
-[`scripts/data/README.md`](../../scripts/data/README.md) also covers setup through the SQL Editor without the CLI, and what to do on a project that already has data.
-
-### 3. Fill in `.env.local`
-
-[`env.example`](../../env.example) lists every variable. These seven are required:
-
-| Variable | What it's for |
-| --- | --- |
-| `APP_ORIGIN` | The app's exact origin, such as `http://localhost:3000`. It drives the origin check on every POST and the OAuth redirect. |
-| `NEXT_PUBLIC_SUPABASE_URL` | Supabase project URL |
-| `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | Supabase publishable key |
-| `SUPABASE_SECRET_KEY` | Supabase secret key, server only |
-| `NEXT_PUBLIC_AGORA_APP_ID` | Agora App ID |
-| `NEXT_AGORA_APP_CERTIFICATE` | Agora App Certificate, server only |
-| `ANAM_API_KEY` | Anam API key, server only |
-
-The Agora CLI can write the two Agora keys for you. `env.example` carries the command; replace `testing` with your own project name:
-
-```sh
-agora login
-agora project env write .env.local --project <your-project> --template nextjs --append --json
-```
-
-[`scripts/agora-setup.mjs`](../../scripts/agora-setup.mjs) wraps that command, but it is hard-wired to a project named `testing`, so edit it or run the CLI directly. `--append` adds keys without touching the rest of the file; don't use `--overwrite` on a populated `.env.local`.
-
-Leave `ENABLE_MANUAL_INTERVIEW=false`. The `SCENARIO_LLM_*` and `SCENARIO_REVIEW_LLM_*` variables are only for offline case generation and can stay blank.
-
-### 4. Set up Google sign-in
-
-Follow [`docs/google-auth.md`](../google-auth.md). In short: enable Google in Supabase Authentication > Providers with your Google client ID and secret, give Google the redirect URI `https://<your-project-ref>.supabase.co/auth/v1/callback`, and add `http://localhost:3000/auth/callback` to Supabase's Redirect URLs. For a local Docker stack, configure the provider in [`supabase/config.toml`](../../supabase/config.toml) instead.
-
-### 5. Play
-
-```sh
-pnpm dev
-```
-
-Open `http://localhost:3000`, continue with Google at `/rules`, pass the microphone check, and take a case. Run `pnpm agents:cleanup:watch` in a second terminal so agents from closed tabs are stopped.
-
-Useful checks that need no live services: `pnpm typecheck`, `pnpm lint`, `pnpm test` and `pnpm scenarios:validate`.
+The [README](../../README.md#run-your-own) has the full setup: the accounts you need, Supabase (hosted or local), every `.env.local` value and where to find it, and deploying to Vercel. This guide covers how the game works once it's running.
 
 ## Architecture
 
@@ -162,16 +80,6 @@ Session states are `created → preparing → active → ended → scored`, or `
 ### The suspect's prompt
 
 `buildSuspectAgentContext` in [`lib/server/game.ts`](../../lib/server/game.ts) gives the model only the suspect's own side of the case: their timeline, what they know, the narrow deceptions they're allowed, and the public evidence. Each fact carries `disclosurePhrases`, lines the suspect would really say, and the prompt asks for one of them word for word when a fact is given up. Only the server-side matcher decides what was disclosed.
-
-## Deploy
-
-The production game runs on Vercel.
-
-- [`vercel.json`](../../vercel.json) pins functions to `pdx1` so the route handlers sit next to the Supabase project in the same region. Pick the region that matches your Supabase project.
-- Set the seven variables above for the Production environment, with `APP_ORIGIN` equal to your deployed origin. Preview deployments build without them but their APIs fail.
-- Add `https://<your-origin>/auth/callback` to Supabase's Redirect URLs and set the Site URL to the deployed origin.
-- Run the cleanup worker somewhere long-running: `pnpm agents:cleanup:watch` sweeps every minute, stopping agents whose interview has passed 180 seconds, releasing runs that never committed within five minutes, and ending the session. Agents also expire on their own after five minutes (`expiresIn` in `server-agent.ts`), so a missed sweep costs minutes, not hours. The worker needs a long-running host; Vercel's Hobby plan isn't suitable.
-- Pushing to `main` deploys production.
 
 ## Troubleshooting
 

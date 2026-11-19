@@ -26,3 +26,6 @@ game-scenarios/generated/
 logs/
 
 supabase/.temp/
+
+# Local Supabase JWT signing key (private)
+supabase/signing_keys.json

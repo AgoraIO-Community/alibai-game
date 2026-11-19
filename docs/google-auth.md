@@ -1,15 +1,16 @@
 # Google sign-in
 
-Players use Continue with Google at `/rules`. The server starts Supabase OAuth with PKCE, exchanges the callback code at `/auth/callback`, and stores the resulting session in the existing HttpOnly Alibai cookies. OAuth transport cookies are cleared afterward. The player's Supabase user ID remains the owner of sessions and leaderboard scores.
+Players sign in with Google at `/rules`. The server starts Supabase OAuth with PKCE, exchanges the code at `/auth/callback`, and keeps the session in HttpOnly cookies. The player's Supabase user ID owns their sessions and leaderboard scores.
 
-Enable Google in Supabase Authentication > Providers with a Google OAuth web client ID and secret. These credentials belong in the Supabase provider settings, not public Next.js variables.
+The [README](../README.md#2-set-up-supabase) has the setup steps for a hosted and a local Supabase project. In short:
 
-Google Cloud authorized redirect URI:
+| Where | What to set |
+| --- | --- |
+| Google Cloud OAuth client (Web application) | Authorized redirect URI: `https://<your-project-ref>.supabase.co/auth/v1/callback`, or `http://127.0.0.1:54321/auth/v1/callback` for local Supabase |
+| Supabase → Authentication → Sign In / Providers → Google | Your Google client ID and secret. Locally, these go in the root `.env` and `[auth.external.google]` in `supabase/config.toml` |
+| Supabase → Authentication → URL Configuration | Site URL: your app's origin. Redirect URLs: `<your-origin>/auth/callback` for each origin you use |
+| `.env.local` | `APP_ORIGIN` set to the exact origin, including scheme and port |
 
-```
-https://vfqxxkvokbgrooxhkdmi.supabase.co/auth/v1/callback
-```
+If Google sends you to `localhost` from a deployed site, the Supabase Site URL or Redirect URLs are wrong. The app only follows the redirect Supabase gives it.
 
-Set `APP_ORIGIN` to the app's actual origin. Add `http://localhost:3000/auth/callback` and the deployed app's `/auth/callback` URL to Supabase Authentication > URL Configuration > Redirect URLs. Set the Site URL to the deployed origin. Match hostname and port exactly when testing locally.
-
-Run `pnpm install`, `pnpm typecheck`, `pnpm lint`, and `pnpm build -- --webpack`, then test Google consent, successful callback, cancellation, logout, and returning-player history. These OAuth changes have not completed live verification: the agent environment could not reach the package registry or bind a local server port. Earlier passing build/tests predate this OAuth change.
+The Google client secret belongs in Supabase, never in a `NEXT_PUBLIC_` variable.
